@@ -29,6 +29,7 @@ import {
   Language,
 } from './types';
 import { DatabaseConnection, getDatabasePath, removeDatabaseFiles } from './db';
+import { initRequirementDb } from './db/requirement-db';
 import { WalCheckpointValve, resolveWalValveMb } from './db/wal-valve';
 import { QueryBuilder, type DeprioritizedPathMatcher } from './db/queries';
 import { importPathKeys, moduleReferenceKeys } from './db/reference-tail';
@@ -385,6 +386,13 @@ export class CodeGraph {
 
     const instance = new CodeGraph(db, queries, resolvedRoot);
 
+    // Create the independent requirement-graph database (.codegraph-req/).
+    // It lives apart from the code index so a full re-index / uninit never
+    // touches requirement memory. Opened just to apply its schema, then closed.
+    try {
+      initRequirementDb(resolvedRoot).close();
+    } catch { /* non-fatal: requirement memory is optional, code index still works */ }
+
     // Run initial indexing if requested
     if (options.index) {
       await instance.indexAll({ onProgress: options.onProgress });
@@ -411,6 +419,10 @@ export class CodeGraph {
     const dbPath = getDatabasePath(resolvedRoot);
     const db = DatabaseConnection.initialize(dbPath);
     const queries = new QueryBuilder(db.getDb());
+
+    try {
+      initRequirementDb(resolvedRoot).close();
+    } catch { /* non-fatal: requirement memory is optional, code index still works */ }
 
     return new CodeGraph(db, queries, resolvedRoot);
   }

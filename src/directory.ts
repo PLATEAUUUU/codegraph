@@ -14,6 +14,30 @@ import { loadNodeSqlite } from './db/node-sqlite';
 export const DEFAULT_CODEGRAPH_DIR = '.codegraph';
 
 /**
+ * The requirement-graph data directory name. Deliberately SEPARATE from
+ * `.codegraph/`: requirement memory is long-lived and must survive a full
+ * re-index of the code graph. `uninit` removes `.codegraph/` but only clears
+ * this one after an explicit confirmation. Its database never enters git.
+ */
+export const REQUIREMENT_DIR = '.codegraph-req';
+export const REQUIREMENT_DB_FILENAME = 'requirement.db';
+
+/** Absolute path to the requirement-graph directory for a project. */
+export function getRequirementDir(projectRoot: string): string {
+  return path.join(projectRoot, REQUIREMENT_DIR);
+}
+
+/** Absolute path to the requirement-graph database file for a project. */
+export function getRequirementDbPath(projectRoot: string): string {
+  return path.join(getRequirementDir(projectRoot), REQUIREMENT_DB_FILENAME);
+}
+
+/** Whether a project has a requirement-graph directory on disk. */
+export function requirementDirExists(projectRoot: string): boolean {
+  return fs.existsSync(getRequirementDir(projectRoot));
+}
+
+/**
  * The data directory name WSL gives a fresh project on a Windows drive, so it
  * never shares one index with CodeGraph on Windows (issue #995). Indexing and
  * watching skip every `.codegraph-*` sibling on both sides (#636).

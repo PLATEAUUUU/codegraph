@@ -53,7 +53,7 @@ try {
 import { Command } from 'commander';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getCodeGraphDir, isInitialized, hasSchemalessDb, hasForeignDbFile, unsafeIndexRootReason, findNearestCodeGraphRoot, planFrontload, isTaskNotification, isAgentMessage, isCrossSessionMessage, stripSystemReminders, hasStructuralKeyword, extractCodeTokens, capPromptHookInjection, codeGraphDirName, DEFAULT_CODEGRAPH_DIR } from '../directory';
+import { getCodeGraphDir, isInitialized, hasSchemalessDb, hasForeignDbFile, unsafeIndexRootReason, findNearestCodeGraphRoot, planFrontload, isTaskNotification, isAgentMessage, isCrossSessionMessage, stripSystemReminders, hasStructuralKeyword, extractCodeTokens, capPromptHookInjection, codeGraphDirName, DEFAULT_CODEGRAPH_DIR, REQUIREMENT_DIR, getRequirementDir, requirementDirExists } from '../directory';
 import { extractProseCandidates } from '../search/identifier-segments';
 import { detectWorktreeIndexMismatch, worktreeMismatchWarning } from '../sync/worktree';
 import { createShimmerProgress } from '../ui/shimmer-progress';
@@ -863,6 +863,32 @@ program
       const { default: CodeGraph } = await loadCodeGraph();
       const cg = CodeGraph.openSync(projectPath);
       cg.uninitialize();
+
+      // Requirement memory lives in a SEPARATE directory (.codegraph-req/) and
+      // is long-lived by design, so uninitialize() above does NOT remove it.
+      // Only clear it on an explicit confirmation; --force keeps it (force is
+      // about the code index). Default answer is to KEEP.
+      if (requirementDirExists(projectPath)) {
+        let removeReq = false;
+        if (!options.force) {
+          const readline = await import('readline');
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const answer = await new Promise<string>((resolve) => {
+            rl.question(
+              chalk.yellow(`${getGlyphs().warn} Requirement-graph data found in ${REQUIREMENT_DIR}/. Delete it too? (y/N) `),
+              resolve
+            );
+          });
+          rl.close();
+          removeReq = answer.toLowerCase() === 'y';
+        }
+        if (removeReq) {
+          fs.rmSync(getRequirementDir(projectPath), { recursive: true, force: true });
+          info(`Removed requirement-graph data (${REQUIREMENT_DIR}/)`);
+        } else {
+          info(`Kept requirement-graph data (${REQUIREMENT_DIR}/)`);
+        }
+      }
 
       // Clean up any git sync hooks we installed (no-op if none / not a repo).
       try {
