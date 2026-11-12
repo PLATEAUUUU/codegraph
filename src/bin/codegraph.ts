@@ -3042,6 +3042,67 @@ program
     console.log(packageJson.version);
   });
 
+/**
+ * codegraph req <subcommand> — requirement-graph queries.
+ */
+const reqCommand = program.command('req').description('Query the requirement graph');
+
+reqCommand
+  .command('list [path]')
+  .description('List stored requirements, newest first')
+  .option('-l, --limit <n>', 'Max rows to return', '50')
+  .option('-o, --offset <n>', 'Rows to skip', '0')
+  .option('-j, --json', 'Output as JSON')
+  .action(async (pathArg: string | undefined, options: { limit: string; offset: string; json?: boolean }) => {
+    const projectPath = resolveProjectPath(pathArg);
+    const { openRequirementStore } = await import('../db/requirement-db');
+    const { store, close } = openRequirementStore(projectPath);
+    try {
+      const rows = store.listRequirements(Number(options.limit), Number(options.offset));
+      if (options.json) {
+        console.log(JSON.stringify(rows, null, 2));
+        return;
+      }
+      if (rows.length === 0) {
+        info('No requirements stored yet.');
+        return;
+      }
+      for (const r of rows) {
+        console.log(`${chalk.bold(String(r.id))}  ${r.requirementsId ?? '-'}  ${r.title ?? '(untitled)'}`);
+      }
+    } finally {
+      close();
+    }
+  });
+
+reqCommand
+  .command('show <id> [path]')
+  .description('Show a requirement with its change sets, nodes and edges')
+  .option('-j, --json', 'Output as JSON')
+  .action(async (id: string, pathArg: string | undefined, options: { json?: boolean }) => {
+    const projectPath = resolveProjectPath(pathArg);
+    const { openRequirementStore } = await import('../db/requirement-db');
+    const { store, close } = openRequirementStore(projectPath);
+    try {
+      const detail = store.getRequirementById(Number(id));
+      if (!detail) {
+        warn(`No requirement with id ${id}`);
+        return;
+      }
+      if (options.json) {
+        console.log(JSON.stringify(detail, null, 2));
+        return;
+      }
+      const r = detail.requirement;
+      console.log(chalk.bold(`\nRequirement ${r.id}`) + `  ${r.requirementsId ?? '-'}`);
+      console.log(`  Title:    ${r.title ?? '(untitled)'}`);
+      console.log(`  Feature:  ${r.featureName ?? '-'}  (${r.featurePath ?? '-'})`);
+      console.log(`  Change sets: ${detail.changeSets.length}, nodes: ${detail.changeNodes.length}, edges: ${detail.changeEdges.length}`);
+    } finally {
+      close();
+    }
+  });
+
 // Parse and run
 program.parse();
 

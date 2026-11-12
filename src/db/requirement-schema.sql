@@ -5,17 +5,13 @@
 -- re-index or `uninit` of the code graph must NOT touch it. See requirement-db.ts.
 --
 -- Node identity note: references into the code graph use a LOGICAL KEY
--- (service, file_path, kind, qualified_name), NOT codegraph's node id — that id
--- is a content hash of (path:kind:name:line) and drifts whenever a symbol moves
--- lines. `codegraph_node_id` here is a nullable write-time snapshot cache only;
--- nothing depends on it staying valid. change_edges point at change_nodes.id
--- (our own stable integer PK), so the modification graph never breaks.
+-- (service, file_path, kind, qualified_name), never codegraph's volatile node
+-- id. change_edges point at change_nodes.id (our own stable integer PK).
 
 -- Requirements: the PRD/requirement master record.
 CREATE TABLE IF NOT EXISTS requirements (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     requirements_id TEXT UNIQUE,              -- external business requirement number (not a FK)
-    branch_name     TEXT,
     title           TEXT,
     original_text   TEXT,
     feature_name    TEXT,
@@ -43,9 +39,10 @@ CREATE TABLE IF NOT EXISTS change_nodes (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     requirement_id     INTEGER NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
     change_set_id      INTEGER NOT NULL REFERENCES change_sets(id) ON DELETE CASCADE,
+    service            TEXT,                  -- microservice name/id (denormalized for the location index)
     file_path          TEXT,
     old_file_path      TEXT,                  -- path before a rename/move
-    kind               TEXT,                  -- aligns with codegraph NodeKind: file/class/method/function/...
+    kind               TEXT,                  -- codegraph NodeKind: file, module, class, struct, interface, trait, protocol, function, method, property, field, variable, constant, enum, enum_member, type_alias, namespace, parameter, import, export, route, component, union
     qualified_name     TEXT,                  -- line-independent semantic full name; the identity anchor
     old_qualified_name TEXT,                  -- full name before a rename (stitching evidence for delete+add)
     signature          TEXT,                  -- disambiguates overloads sharing a qualified_name
@@ -64,33 +61,18 @@ CREATE TABLE IF NOT EXISTS change_edges (
     requirement_id        INTEGER NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
     source_change_node_id INTEGER NOT NULL REFERENCES change_nodes(id) ON DELETE CASCADE,
     target_change_node_id INTEGER NOT NULL REFERENCES change_nodes(id) ON DELETE CASCADE,
-    relation_type         TEXT,               -- contains / calls / related_to
-    evidence_type         TEXT                -- static_analysis / manual / inferred
+    relation_type         TEXT                -- codegraph EdgeKind: contains, calls, imports, exports, extends, implements, references, type_of, returns, instantiates, overrides, decorates, navigates
 );
 CREATE INDEX IF NOT EXISTS idx_change_edges_req ON change_edges(requirement_id);
 CREATE INDEX IF NOT EXISTS idx_change_edges_src ON change_edges(source_change_node_id);
 CREATE INDEX IF NOT EXISTS idx_change_edges_tgt ON change_edges(target_change_node_id);
 
 -- =============================================================================
--- Full-text search over requirements (FTS5). Split out at the end so a Node
--- build without FTS5 can skip JUST this block (requirement-db.ts try/catches it)
--- and still get every table above.
+-- Full-text search over requirements (FTS5). Plain (non external-content) table
+-- holding segmented text; RequirementStore maintains it on insert/update/delete
+-- with jieba-segmented content. rowid mirrors requirements.id. Split out at the
+-- end so a Node build without FTS5 can skip this block (requirement-db.ts).
 -- =============================================================================
 CREATE VIRTUAL TABLE IF NOT EXISTS requirements_fts USING fts5(
-    title, original_text, feature_name, feature_path,
-    content='requirements', content_rowid='id'
+    title, original_text, feature_name, feature_path
 );
-CREATE TRIGGER IF NOT EXISTS requirements_ai AFTER INSERT ON requirements BEGIN
-    INSERT INTO requirements_fts(rowid, title, original_text, feature_name, feature_path)
-    VALUES (NEW.id, NEW.title, NEW.original_text, NEW.feature_name, NEW.feature_path);
-END;
-CREATE TRIGGER IF NOT EXISTS requirements_ad AFTER DELETE ON requirements BEGIN
-    INSERT INTO requirements_fts(requirements_fts, rowid, title, original_text, feature_name, feature_path)
-    VALUES ('delete', OLD.id, OLD.title, OLD.original_text, OLD.feature_name, OLD.feature_path);
-END;
-CREATE TRIGGER IF NOT EXISTS requirements_au AFTER UPDATE ON requirements BEGIN
-    INSERT INTO requirements_fts(requirements_fts, rowid, title, original_text, feature_name, feature_path)
-    VALUES ('delete', OLD.id, OLD.title, OLD.original_text, OLD.feature_name, OLD.feature_path);
-    INSERT INTO requirements_fts(rowid, title, original_text, feature_name, feature_path)
-    VALUES (NEW.id, NEW.title, NEW.original_text, NEW.feature_name, NEW.feature_path);
-END;

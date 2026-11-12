@@ -6,11 +6,11 @@
  */
 
 import type { SqliteDatabase, SqliteStatement } from './sqlite-adapter';
+import { segment } from '../requirement/segmenter';
 
 export interface RequirementRow {
   id: number;
   requirementsId: string | null;
-  branchName: string | null;
   title: string | null;
   originalText: string | null;
   featureName: string | null;
@@ -35,7 +35,6 @@ export interface ChangeNodeRow {
   id: number;
   requirementId: number;
   changeSetId: number;
-  codegraphNodeId: string | null;
   service: string | null;
   filePath: string | null;
   oldFilePath: string | null;
@@ -53,7 +52,6 @@ export interface ChangeEdgeRow {
   sourceChangeNodeId: number;
   targetChangeNodeId: number;
   relationType: string | null;
-  evidenceType: string | null;
 }
 
 // Insert shapes: id and timestamps are assigned by the store. FK columns are
@@ -95,6 +93,9 @@ export class RequirementStore {
     getChangeEdgesByReq?: SqliteStatement;
     deleteRequirement?: SqliteStatement;
     deleteChangeSet?: SqliteStatement;
+    ftsInsert?: SqliteStatement;
+    ftsDelete?: SqliteStatement;
+    searchRequirements?: SqliteStatement;
   } = {};
 
   constructor(db: SqliteDatabase) {
@@ -106,13 +107,36 @@ export class RequirementStore {
     return this.db.transaction(fn)();
   }
 
+  /** Write a requirement's segmented text into the FTS index (rowid = id). */
+  private writeFts(id: number, r: RequirementInput): void {
+    if (!this.stmts.ftsInsert) {
+      this.stmts.ftsInsert = this.db.prepare(
+        `INSERT INTO requirements_fts(rowid, title, original_text, feature_name, feature_path)
+         VALUES (@rowid, @title, @originalText, @featureName, @featurePath)`
+      );
+    }
+    this.stmts.ftsInsert.run({
+      rowid: id,
+      title: segment(r.title),
+      originalText: segment(r.originalText),
+      featureName: segment(r.featureName),
+      featurePath: segment(r.featurePath),
+    });
+  }
+
+  private deleteFts(id: number): void {
+    if (!this.stmts.ftsDelete) {
+      this.stmts.ftsDelete = this.db.prepare('DELETE FROM requirements_fts WHERE rowid = ?');
+    }
+    this.stmts.ftsDelete.run(id);
+  }
+
   // --- row mappers: snake_case DB row -> camelCase typed row ---------------
   private toRequirement(r: any): RequirementRow | null {
     if (!r) return null;
     return {
       id: r.id,
       requirementsId: r.requirements_id ?? null,
-      branchName: r.branch_name ?? null,
       title: r.title ?? null,
       originalText: r.original_text ?? null,
       featureName: r.feature_name ?? null,
@@ -143,7 +167,6 @@ export class RequirementStore {
       id: r.id,
       requirementId: r.requirement_id,
       changeSetId: r.change_set_id,
-      codegraphNodeId: r.codegraph_node_id ?? null,
       service: r.service ?? null,
       filePath: r.file_path ?? null,
       oldFilePath: r.old_file_path ?? null,
@@ -164,7 +187,6 @@ export class RequirementStore {
       sourceChangeNodeId: r.source_change_node_id,
       targetChangeNodeId: r.target_change_node_id,
       relationType: r.relation_type ?? null,
-      evidenceType: r.evidence_type ?? null,
     };
   }
 
@@ -173,10 +195,10 @@ export class RequirementStore {
     if (!this.stmts.insertRequirement) {
       this.stmts.insertRequirement = this.db.prepare(`
         INSERT INTO requirements (
-          requirements_id, branch_name, title, original_text,
+          requirements_id, title, original_text,
           feature_name, feature_path, entry_point, created_at, updated_at
         ) VALUES (
-          @requirementsId, @branchName, @title, @originalText,
+          @requirementsId, @title, @originalText,
           @featureName, @featurePath, @entryPoint, @createdAt, @updatedAt
         )
       `);
@@ -184,7 +206,6 @@ export class RequirementStore {
     const now = Date.now();
     const info = this.stmts.insertRequirement.run({
       requirementsId: input.requirementsId ?? null,
-      branchName: input.branchName ?? null,
       title: input.title ?? null,
       originalText: input.originalText ?? null,
       featureName: input.featureName ?? null,
@@ -193,7 +214,9 @@ export class RequirementStore {
       createdAt: now,
       updatedAt: now,
     });
-    return Number(info.lastInsertRowid);
+    const id = Number(info.lastInsertRowid);
+    this.writeFts(id, input);
+    return id;
   }
 
   insertChangeSet(input: ChangeSetInput): number {
@@ -224,11 +247,11 @@ export class RequirementStore {
     if (!this.stmts.insertChangeNode) {
       this.stmts.insertChangeNode = this.db.prepare(`
         INSERT INTO change_nodes (
-          requirement_id, change_set_id, codegraph_node_id, service,
+          requirement_id, change_set_id, service,
           file_path, old_file_path, kind, qualified_name,
           old_qualified_name, signature, change_type, git_diff
         ) VALUES (
-          @requirementId, @changeSetId, @codegraphNodeId, @service,
+          @requirementId, @changeSetId, @service,
           @filePath, @oldFilePath, @kind, @qualifiedName,
           @oldQualifiedName, @signature, @changeType, @gitDiff
         )
@@ -237,7 +260,6 @@ export class RequirementStore {
     const info = this.stmts.insertChangeNode.run({
       requirementId: input.requirementId,
       changeSetId: input.changeSetId,
-      codegraphNodeId: input.codegraphNodeId ?? null,
       service: input.service ?? null,
       filePath: input.filePath ?? null,
       oldFilePath: input.oldFilePath ?? null,
@@ -256,10 +278,10 @@ export class RequirementStore {
       this.stmts.insertChangeEdge = this.db.prepare(`
         INSERT INTO change_edges (
           requirement_id, source_change_node_id, target_change_node_id,
-          relation_type, evidence_type
+          relation_type
         ) VALUES (
           @requirementId, @sourceChangeNodeId, @targetChangeNodeId,
-          @relationType, @evidenceType
+          @relationType
         )
       `);
     }
@@ -268,7 +290,6 @@ export class RequirementStore {
       sourceChangeNodeId: input.sourceChangeNodeId,
       targetChangeNodeId: input.targetChangeNodeId,
       relationType: input.relationType ?? null,
-      evidenceType: input.evidenceType ?? null,
     });
     return Number(info.lastInsertRowid);
   }
@@ -302,7 +323,6 @@ export class RequirementStore {
   }
 
   // --- requirement reads ---------------------------------------------------
-
   /** A requirement with its change sets, nodes, and edges. null if absent. */
   getRequirementById(id: number): RequirementDetail | null {
     if (!this.stmts.getRequirement) {
@@ -355,7 +375,6 @@ export class RequirementStore {
   updateRequirement(id: number, patch: RequirementInput): void {
     const columns: Record<keyof RequirementInput, string> = {
       requirementsId: 'requirements_id',
-      branchName: 'branch_name',
       title: 'title',
       originalText: 'original_text',
       featureName: 'feature_name',
@@ -373,16 +392,26 @@ export class RequirementStore {
     }
     sets.push('updated_at = @updatedAt');
 
-    this.db.prepare(`UPDATE requirements SET ${sets.join(', ')} WHERE id = @id`).run(params);
+    this.runInTransaction(() => {
+      this.db.prepare(`UPDATE requirements SET ${sets.join(', ')} WHERE id = @id`).run(params);
+      // Re-segment the FTS row from the full updated record, not just the patch.
+      const detail = this.getRequirementById(id);
+      if (detail) {
+        this.deleteFts(id);
+        this.writeFts(id, detail.requirement);
+      }
+    });
   }
 
   // --- deletes (dependent rows cascade via FK) ----------------------------
-
   deleteRequirement(id: number): void {
     if (!this.stmts.deleteRequirement) {
       this.stmts.deleteRequirement = this.db.prepare('DELETE FROM requirements WHERE id = ?');
     }
-    this.stmts.deleteRequirement.run(id);
+    this.runInTransaction(() => {
+      this.deleteFts(id);
+      this.stmts.deleteRequirement!.run(id);
+    });
   }
 
   deleteChangeSet(id: number): void {
@@ -390,5 +419,26 @@ export class RequirementStore {
       this.stmts.deleteChangeSet = this.db.prepare('DELETE FROM change_sets WHERE id = ?');
     }
     this.stmts.deleteChangeSet.run(id);
+  }
+
+  /**
+   * Full-text search over requirements. `query` is segmented the same way as
+   * indexed text; tokens are OR-matched and ranked by bm25. Returns whole
+   * requirement rows, most relevant first. Empty query → [].
+   */
+  searchRequirements(query: string, limit = 3): RequirementRow[] {
+    const tokens = segment(query).split(' ').filter((t) => t.length > 0);
+    if (tokens.length === 0) return [];
+    const match = tokens.map((t) => `"${t.replace(/"/g, '""')}"`).join(' OR ');
+
+    if (!this.stmts.searchRequirements) {
+      this.stmts.searchRequirements = this.db.prepare(
+        `SELECT r.* FROM requirements_fts f
+         JOIN requirements r ON r.id = f.rowid
+         WHERE requirements_fts MATCH ?
+         ORDER BY bm25(requirements_fts) LIMIT ?`
+      );
+    }
+    return this.stmts.searchRequirements.all(match, limit).map((r) => this.toRequirement(r)!);
   }
 }

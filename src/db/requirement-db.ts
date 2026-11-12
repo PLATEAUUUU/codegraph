@@ -14,6 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createDatabase, type SqliteDatabase } from './sqlite-adapter';
 import { getRequirementDir, getRequirementDbPath } from '../directory';
+import { RequirementStore } from './requirement-store';
 
 /** `.gitignore` that keeps the whole requirement dir out of git (local-only). */
 const REQ_GITIGNORE_CONTENT = `# CodeGraph requirement-graph data — local to each machine, not for committing.
@@ -53,6 +54,18 @@ export function initRequirementDb(projectRoot: string): SqliteDatabase {
   configureRequirementConnection(db);
   applyRequirementSchema(db);
   return db;
+}
+
+/** A RequirementStore over an open connection, with the handle to close it. */
+export interface OpenRequirementStore {
+  store: RequirementStore;
+  close: () => void;
+}
+
+/** Open the requirement db and wrap it in a store. Caller must call close(). */
+export function openRequirementStore(projectRoot: string): OpenRequirementStore {
+  const db = initRequirementDb(projectRoot);
+  return { store: new RequirementStore(db), close: () => db.close() };
 }
 
 /**
