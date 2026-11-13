@@ -1,17 +1,18 @@
 /**
- * Classify a file's diff into changed symbols (add / modify / delete) by
- * intersecting changed lines with symbols extracted from the base and final
- * versions of each file. Each symbol carries the diff hunks that touch it.
+ * Classify diffs into changed symbols (add / modify / delete): changed lines are
+ * matched against symbols extracted from the base and final version of each
+ * file. Each symbol carries the diff hunks that touch it.
  */
 
 import { extractFromSource } from '../extraction';
 import { detectLanguage } from '../extraction/grammars';
-import { runGitRaw } from './git';
+import { runGit, runGitRaw } from './git';
+import { parseDiff } from './diff';
 import type { Node } from '../types';
 import type { FileDiff, Hunk } from './diff';
 import type { ChangeNodeInput } from '../db/requirement-store';
 
-/** Symbol fields S4 needs from an extracted node. */
+/** Fields kept from an extracted node. */
 export interface SymbolSpan {
   qualifiedName: string;
   kind: string;
@@ -63,6 +64,32 @@ function touches(sym: SymbolSpan, lines: number[]): boolean {
   return lines.some((ln) => ln >= sym.startLine && ln <= sym.endLine);
 }
 
+/** Kinds a changed line is attributed to before falling back to any containing symbol. */
+const ABSORBING_KINDS = new Set([
+  'function', 'method', 'class', 'struct', 'interface',
+  'trait', 'protocol', 'enum', 'type_alias', 'route', 'component',
+]);
+
+const span = (s: SymbolSpan): number => s.endLine - s.startLine;
+
+/**
+ * The symbol each changed line belongs to: the innermost absorbing-kind symbol
+ * containing it; if none, the innermost containing symbol of any kind. Returns
+ * the set of owner symbols keyed by qualifiedName.
+ */
+function ownersOf(lines: number[], symbols: SymbolSpan[]): Map<string, SymbolSpan> {
+  const owners = new Map<string, SymbolSpan>();
+  for (const ln of lines) {
+    const containing = symbols.filter((s) => ln >= s.startLine && ln <= s.endLine);
+    if (containing.length === 0) continue;
+    const absorbing = containing.filter((s) => ABSORBING_KINDS.has(s.kind));
+    const pool = absorbing.length > 0 ? absorbing : containing;
+    const owner = pool.reduce((a, b) => (span(b) < span(a) ? b : a));
+    owners.set(owner.qualifiedName, owner);
+  }
+  return owners;
+}
+
 /** Context for classifying one file: its diff plus both versions' symbols. */
 export interface ClassifyInput {
   service: string;
@@ -84,16 +111,15 @@ export function classifyFileChange(input: ClassifyInput): ChangeNodeInput[] {
   const oldChanged = perHunk.flatMap((h) => h.oldLines);
   const newChanged = perHunk.flatMap((h) => h.newLines);
 
-  // Full-set lookups decide existence (add/modify/delete); changed lines only
-  // decide which symbols this diff touches. A pure insertion into an existing
-  // function has no old-side changed line, yet the function exists on both
-  // sides and must read as modify, not add.
+  // Symbols touched = owners of the changed lines; add/modify/delete = whether
+  // each touched name exists in the base set, the final set, or both.
   const baseByName = new Map(baseSymbols.map((s) => [s.qualifiedName, s]));
   const finalByName = new Map(finalSymbols.map((s) => [s.qualifiedName, s]));
 
-  const touched = new Set<string>();
-  for (const s of baseSymbols) if (touches(s, oldChanged)) touched.add(s.qualifiedName);
-  for (const s of finalSymbols) if (touches(s, newChanged)) touched.add(s.qualifiedName);
+  const touched = new Set<string>([
+    ...ownersOf(oldChanged, baseSymbols).keys(),
+    ...ownersOf(newChanged, finalSymbols).keys(),
+  ]);
 
   const filePath = fileDiff.path;
   const oldFilePath = fileDiff.status === 'R' ? fileDiff.oldPath : undefined;
@@ -154,4 +180,44 @@ export function classifyServiceChanges(
     rows.push(...classifyFileChange({ service, fileDiff, baseSymbols, finalSymbols }));
   }
   return rows;
+}
+
+/** git's empty tree; the base of a root commit. */
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
+/**
+ * Combine an earlier change type with a later one on the same symbol.
+ * null means the two cancel out (added then deleted).
+ */
+export function mergeChangeType(prev: string, next: string): string | null {
+  if (prev === 'add') return next === 'delete' ? null : 'add';
+  if (prev === 'delete') return next === 'add' ? 'modify' : 'delete';
+  return next === 'delete' ? 'delete' : 'modify';
+}
+
+/**
+ * Classify each commit against its parent, then fold the per-commit rows into
+ * one row per (filePath, qualifiedName) using mergeChangeType. Diffs are joined
+ * in commit order. `commits` must be oldest first.
+ */
+export function classifyCommits(service: string, repo: string, commits: string[]): ChangeNodeInput[] {
+  const folded = new Map<string, ChangeNodeInput>();
+  for (const c of commits) {
+    const parent = runGit(repo, ['rev-parse', '--verify', '--quiet', `${c}^`]) ?? EMPTY_TREE;
+    const rows = classifyServiceChanges(service, repo, parent, c, parseDiff(repo, parent, c));
+    for (const row of rows) {
+      const key = `${row.filePath}\0${row.qualifiedName}`;
+      const prev = folded.get(key);
+      if (!prev) { folded.set(key, row); continue; }
+      const changeType = mergeChangeType(prev.changeType!, row.changeType!);
+      if (changeType === null) { folded.delete(key); continue; }
+      folded.set(key, {
+        ...row,
+        oldFilePath: prev.oldFilePath ?? row.oldFilePath,
+        changeType,
+        gitDiff: [prev.gitDiff, row.gitDiff].filter(Boolean).join('\n'),
+      });
+    }
+  }
+  return [...folded.values()];
 }

@@ -13,12 +13,7 @@ import { loadNodeSqlite } from './db/node-sqlite';
 /** The default per-project data directory name. */
 export const DEFAULT_CODEGRAPH_DIR = '.codegraph';
 
-/**
- * The requirement-graph data directory name. Deliberately SEPARATE from
- * `.codegraph/`: requirement memory is long-lived and must survive a full
- * re-index of the code graph. `uninit` removes `.codegraph/` but only clears
- * this one after an explicit confirmation. Its database never enters git.
- */
+/** The requirement-graph data directory name, a sibling of `.codegraph/`. */
 export const REQUIREMENT_DIR = '.codegraph-req';
 export const REQUIREMENT_DB_FILENAME = 'requirement.db';
 

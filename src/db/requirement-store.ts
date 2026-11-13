@@ -74,6 +74,26 @@ export interface RequirementDetail {
   changeEdges: ChangeEdgeRow[];
 }
 
+/** An edge referencing change_nodes by their position in a service's node list. */
+export interface BundleEdge {
+  sourceIndex: number;
+  targetIndex: number;
+  relationType: string;
+}
+
+/** One service's change set, its nodes, and the edges among them. */
+export interface BundleService {
+  changeSet: ChangeSetInput;
+  changeNodes: ChangeNodeInput[];
+  edges: BundleEdge[];
+}
+
+/** A whole requirement ready to write: the requirement plus every service. */
+export interface RequirementBundle {
+  requirement: RequirementInput;
+  services: BundleService[];
+}
+
 // =============================================================================
 // Store
 // =============================================================================
@@ -394,7 +414,7 @@ export class RequirementStore {
 
     this.runInTransaction(() => {
       this.db.prepare(`UPDATE requirements SET ${sets.join(', ')} WHERE id = @id`).run(params);
-      // Re-segment the FTS row from the full updated record, not just the patch.
+      // Rewrite the FTS row from the full updated record.
       const detail = this.getRequirementById(id);
       if (detail) {
         this.deleteFts(id);
@@ -440,5 +460,34 @@ export class RequirementStore {
       );
     }
     return this.stmts.searchRequirements.all(match, limit).map((r) => this.toRequirement(r)!);
+  }
+
+  /**
+   * Write a whole requirement in one transaction: the requirement, then each
+   * service's change set, its change nodes, and the edges among them (edge
+   * indices address that service's node list). Returns the new requirement id.
+   */
+  saveRequirementBundle(bundle: RequirementBundle): number {
+    return this.runInTransaction(() => {
+      const reqId = this.insertRequirement(bundle.requirement);
+      for (const svc of bundle.services) {
+        const csId = this.insertChangeSet({ ...svc.changeSet, requirementId: reqId });
+        const nodeIds = svc.changeNodes.map((n) =>
+          this.insertChangeNode({ ...n, requirementId: reqId, changeSetId: csId })
+        );
+        for (const e of svc.edges) {
+          const source = nodeIds[e.sourceIndex];
+          const target = nodeIds[e.targetIndex];
+          if (source === undefined || target === undefined) continue;
+          this.insertChangeEdge({
+            requirementId: reqId,
+            sourceChangeNodeId: source,
+            targetChangeNodeId: target,
+            relationType: e.relationType,
+          });
+        }
+      }
+      return reqId;
+    });
   }
 }

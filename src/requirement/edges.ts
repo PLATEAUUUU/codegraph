@@ -1,8 +1,7 @@
 /**
- * Build change_edges by reading the already-resolved edges from each service's
- * codegraph index. A change_node is mapped to its index node via logical key
- * (qualifiedName + index-root-relative path); edges with both endpoints in the
- * change set are kept. The index must be no older than the final commit.
+ * Build change_edges from each service's codegraph index. A change_node is
+ * mapped to its index node by qualifiedName + index-root-relative path; edges
+ * with both endpoints in the change set are kept.
  */
 
 import * as path from 'path';
@@ -26,8 +25,8 @@ export interface FreshnessResult {
 }
 
 /**
- * The index covering `serviceRepo` must have been built at or after the final
- * commit. Compares getLastIndexedAt() against the commit's timestamp.
+ * Check that the index covering `serviceRepo` was built at or after
+ * `finalCommit`'s commit time.
  */
 export function checkIndexFreshness(serviceRepo: string, finalCommit: string): FreshnessResult {
   const indexRoot = findNearestCodeGraphRoot(serviceRepo);
@@ -51,7 +50,7 @@ export function checkIndexFreshness(serviceRepo: string, finalCommit: string): F
   }
 }
 
-/** Index-root-relative, forward-slash path for a change_node, layout-agnostic. */
+/** A change_node's path relative to the index root, with forward slashes. */
 function indexRelPath(indexRoot: string, serviceRepo: string, filePath: string): string {
   return normalizePath(path.relative(indexRoot, path.join(serviceRepo, filePath)));
 }
@@ -66,9 +65,9 @@ function mapToIndexNode(cg: CodeGraph, indexRoot: string, serviceRepo: string, c
 }
 
 /**
- * Edges among `changeNodes` for one service, read from its index. Returns edges
- * whose source and target are both in the change set, referenced by batch index
- * (`baseIndexOffset` is added so indices address a multi-service batch).
+ * Edges among `changeNodes` for one service, read from its index, with both
+ * endpoints in the change set. Endpoints are positions in `changeNodes` plus
+ * `baseIndexOffset`.
  */
 export function buildServiceEdges(
   serviceRepo: string,
@@ -93,7 +92,7 @@ export function buildServiceEdges(
     for (const edge of cg.getOutgoingEdgesFrom([...idToIndex.keys()])) {
       const sourceIndex = idToIndex.get(edge.source);
       const targetIndex = idToIndex.get(edge.target);
-      if (sourceIndex === undefined || targetIndex === undefined) continue; // both ends must be in the change set
+      if (sourceIndex === undefined || targetIndex === undefined) continue;
       const key = `${sourceIndex}\0${targetIndex}\0${edge.kind}`;
       if (seen.has(key)) continue;
       seen.add(key);

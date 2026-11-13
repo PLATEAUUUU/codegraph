@@ -2,12 +2,8 @@
  * @Description: 请填写简介
  */
 /**
- * Requirement-graph database (requirement.db)
- *
- * A lightweight, independent SQLite database for requirement memory. It lives
- * in `.codegraph-req/` — separate from the code index in `.codegraph/` — so a
- * full re-index or `uninit` of the code graph never touches it.
- *
+ * Requirement-graph database: a standalone SQLite file at
+ * `.codegraph-req/requirement.db`, separate from the code index in `.codegraph/`.
  */
 
 import * as fs from 'fs';
@@ -16,21 +12,18 @@ import { createDatabase, type SqliteDatabase } from './sqlite-adapter';
 import { getRequirementDir, getRequirementDbPath } from '../directory';
 import { RequirementStore } from './requirement-store';
 
-/** `.gitignore` that keeps the whole requirement dir out of git (local-only). */
+/** `.gitignore` written into `.codegraph-req/`; ignores everything but itself. */
 const REQ_GITIGNORE_CONTENT = `# CodeGraph requirement-graph data — local to each machine, not for committing.
 *
 !.gitignore
 `;
 
-/**
- * SQLite PRAGMAs for requirement.db. Kept minimal on purpose — the big cache /
- * mmap / WAL-heal tuning the code index uses is overkill for a small database.
- */
+/** Connection PRAGMAs for requirement.db. */
 function configureRequirementConnection(db: SqliteDatabase): void {
-  db.pragma('busy_timeout = 5000');   // wait, don't error, on a brief concurrent write
-  db.pragma('foreign_keys = ON');     // make the schema's cascades actually fire
-  db.pragma('journal_mode = WAL');    // non-blocking reads, crash-safe
-  db.pragma('synchronous = NORMAL');  // safe with WAL
+  db.pragma('busy_timeout = 5000');
+  db.pragma('foreign_keys = ON');
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
 }
 
 /**
@@ -41,13 +34,12 @@ export function initRequirementDb(projectRoot: string): SqliteDatabase {
   const dir = getRequirementDir(projectRoot);
   fs.mkdirSync(dir, { recursive: true });
 
-  // Keep the database (and WAL/socket sidecars) out of git. Best-effort.
   const gitignorePath = path.join(dir, '.gitignore');
   try {
     if (!fs.existsSync(gitignorePath)) {
       fs.writeFileSync(gitignorePath, REQ_GITIGNORE_CONTENT, 'utf-8');
     }
-  } catch { /* non-fatal: a missing .gitignore doesn't block the DB */ }
+  } catch { /* ignored */ }
 
   const dbPath = getRequirementDbPath(projectRoot);
   const { db } = createDatabase(dbPath);
@@ -69,9 +61,8 @@ export function openRequirementStore(projectRoot: string): OpenRequirementStore 
 }
 
 /**
- * Apply the requirement schema. The FTS5 virtual table + triggers sit at the
- * end of the file behind a marker, so a Node build without FTS5 can skip just
- * that block while still getting every table.
+ * Apply the requirement schema: everything before the FTS5 table first, then
+ * the FTS5 table, skipped with a warning when FTS5 is unavailable.
  */
 function applyRequirementSchema(db: SqliteDatabase): void {
   const schemaPath = path.join(__dirname, 'requirement-schema.sql');
@@ -91,7 +82,7 @@ function applyRequirementSchema(db: SqliteDatabase): void {
     const msg = err?.message ?? String(err);
     console.warn(
       `[codegraph] FTS5 not available in this Node.js build (${msg}). ` +
-      `Requirement search will fall back to LIKE matching.`
+      `Requirement search is unavailable.`
     );
   }
 }

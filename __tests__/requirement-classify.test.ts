@@ -116,6 +116,64 @@ describe('classifyFileChange', () => {
   });
 });
 
+describe('classifyFileChange — hierarchical merge', () => {
+  // Change on line 11, inside a method inside a class.
+  const h = hunk({
+    oldStart: 10, newStart: 10,
+    text: ['@@ -10,3 +10,3 @@', ' keep', '-old', '+new', ' keep'].join('\n'),
+  });
+
+  it('merges a local variable up into its enclosing method', () => {
+    const syms = [
+      sym('C', 1, 30, 'class'),
+      sym('C::m', 8, 20, 'method'),
+      sym('C::m::v', 11, 11, 'variable'), // local var on the changed line
+    ];
+    const rows = classifyFileChange({
+      service: 'svc', fileDiff: { status: 'M', path: 'f.js', hunks: [h] },
+      baseSymbols: syms, finalSymbols: syms,
+    });
+    expect(rows.map((r) => r.qualifiedName)).toEqual(['C::m']); // not the var, not the class
+  });
+
+  it('keeps a top-level variable that has no absorbing ancestor', () => {
+    const syms = [
+      sym('M', 1, 50, 'module'),       // module does not absorb
+      sym('topVar', 11, 11, 'variable'),
+    ];
+    const rows = classifyFileChange({
+      service: 'svc', fileDiff: { status: 'M', path: 'f.js', hunks: [h] },
+      baseSymbols: syms, finalSymbols: syms,
+    });
+    expect(rows.map((r) => r.qualifiedName)).toEqual(['topVar']);
+  });
+
+  it('merges a class field up into the class', () => {
+    const syms = [
+      sym('C', 1, 30, 'class'),
+      sym('C::field', 11, 11, 'field'), // field directly in class, no method
+    ];
+    const rows = classifyFileChange({
+      service: 'svc', fileDiff: { status: 'M', path: 'f.js', hunks: [h] },
+      baseSymbols: syms, finalSymbols: syms,
+    });
+    expect(rows.map((r) => r.qualifiedName)).toEqual(['C']);
+  });
+
+  it('attributes a class change to the class, never the namespace', () => {
+    const syms = [
+      sym('N', 1, 100, 'namespace'),
+      sym('N::C', 5, 30, 'class'),
+      sym('N::C::field', 11, 11, 'field'),
+    ];
+    const rows = classifyFileChange({
+      service: 'svc', fileDiff: { status: 'M', path: 'f.js', hunks: [h] },
+      baseSymbols: syms, finalSymbols: syms,
+    });
+    expect(rows.map((r) => r.qualifiedName)).toEqual(['N::C']); // not N
+  });
+});
+
 // Real merged branch for requirement 1103259 (search-service).
 describe('classifyServiceChanges (real)', () => {
   beforeAll(async () => { await loadAllGrammars(); });

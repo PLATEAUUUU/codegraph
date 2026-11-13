@@ -1,8 +1,6 @@
 /**
- * Text segmentation for requirement full-text search. Wraps jieba-wasm so the
- * same tokenization runs on write (indexing) and read (query). Chinese is cut
- * by dictionary + HMM; other scripts fall out as their own tokens. jieba is
- * loaded lazily on first use.
+ * Text segmentation for requirement full-text search, used for both indexing
+ * and queries. Wraps jieba-wasm (dictionary + HMM), loaded on first use.
  */
 
 type Jieba = {
@@ -27,7 +25,7 @@ export function segment(text: string | null | undefined): string {
   return tokens.map((t) => t.trim()).filter((t) => t.length > 0).join(' ');
 }
 
-/** Add a domain term so jieba keeps it whole. Used by the custom dictionary. */
+/** Add a term to jieba's dictionary. */
 export function addTerm(word: string, freq?: number): void {
   if (!word) return;
   getJieba().add_word(word, freq ?? null, null);

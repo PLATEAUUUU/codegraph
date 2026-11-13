@@ -130,11 +130,13 @@ describe('discoverRequirementChanges', () => {
       expect(s.finalCommit).toMatch(/^[0-9a-f]{40}$/);
       expect(s.baseCommit).toMatch(/^[0-9a-f]{40}$/);
       expect(s.baseCommit).not.toBe(s.finalCommit);
+      expect(s.mode).toBe('unmerged');
+      expect(s.commits).toEqual([s.finalCommit]);
     }
     expect(warnings).toHaveLength(0);
   });
 
-  it('records a warning and null base when no trunk is found', () => {
+  it('falls back to the first-parent run when no trunk is found', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'req-disc-'));
     tmps.push(root);
     makeRepo(root, 'svc', 'develop', 'feature/1103259');
@@ -142,7 +144,9 @@ describe('discoverRequirementChanges', () => {
     const { services, warnings } = discoverRequirementChanges(root, '1103259');
     expect(services).toHaveLength(1);
     expect(services[0].baseBranch).toBeNull();
-    expect(services[0].baseCommit).toBeNull();
+    expect(services[0].mode).toBe('fallback');
+    expect(services[0].commits).toHaveLength(2); // init + feature work, no merge to stop at
+    expect(services[0].baseCommit).toBeNull();   // oldest commit is the root
     expect(warnings.some((w) => w.includes('no base branch'))).toBe(true);
   });
 

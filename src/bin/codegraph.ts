@@ -864,10 +864,7 @@ program
       const cg = CodeGraph.openSync(projectPath);
       cg.uninitialize();
 
-      // Requirement memory lives in a SEPARATE directory (.codegraph-req/) and
-      // is long-lived by design, so uninitialize() above does NOT remove it.
-      // Only clear it on an explicit confirmation; --force keeps it (force is
-      // about the code index). Default answer is to KEEP.
+      // Remove .codegraph-req/ only on an explicit "y"; --force and the default keep it.
       if (requirementDirExists(projectPath)) {
         let removeReq = false;
         if (!options.force) {
@@ -3103,7 +3100,149 @@ reqCommand
     }
   });
 
+reqCommand
+  .command('add <requirements_id> [path]')
+  .description('Record a requirement: discover the services that changed on its branch, diff them, and store the change graph. Re-index each service on its requirement branch first for accurate edges.')
+  .requiredOption('--title <text>', 'Requirement title')
+  .requiredOption('--doc <file>', 'Path to the PRD file; its content is stored as the requirement text')
+  .option('--feature-name <name>', 'Feature/module name')
+  .option('--feature-path <path>', 'Feature location in the product')
+  .option('--api <list>', 'Comma-separated backend API list reached by this requirement')
+  .option('--root <dir>', 'Root directory whose child repos are the services (default: cwd)')
+  .option('--base-branch <list>', 'Comma-separated trunk candidates for base commit (default: main,master)', 'main,master')
+  .option('--services <list>', 'Explicit services: "name" (from discovery) or "name:branch" (supplement)')
+  .option('--dry-run', 'Print the services discovered for this requirement and exit without writing')
+  .action(async (reqId: string, pathArg: string | undefined, options: ReqAddOptions) => {
+    await runReqAdd(reqId, pathArg, options);
+  });
+
+async function runReqAdd(reqId: string, pathArg: string | undefined, options: ReqAddOptions): Promise<void> {
+  const root = options.root ? path.resolve(options.root) : path.resolve(pathArg || process.cwd());
+  const baseBranches = options.baseBranch.split(',').map((b) => b.trim()).filter(Boolean);
+
+  let originalText: string;
+  try {
+    originalText = fs.readFileSync(path.resolve(options.doc), 'utf-8');
+  } catch {
+    error(`Cannot read PRD file: ${options.doc}`);
+    process.exit(1);
+  }
+
+  const { discoverRequirementChanges, resolveService } = await import('../requirement/discovery');
+  const { services: discovered, warnings } = discoverRequirementChanges(root, reqId, baseBranches);
+  for (const w of warnings) warn(w);
+
+  if (options.dryRun) {
+    console.log(JSON.stringify(discovered, null, 2));
+    return;
+  }
+
+  if (discovered.length === 0 && !options.services) {
+    warn(`No services found with a branch matching "${reqId}" under ${root}`);
+    return;
+  }
+
+  // Resolve the services to record.
+  let selected: typeof discovered;
+  if (options.services) {
+    selected = [];
+    for (const spec of options.services.split(',').map((s) => s.trim()).filter(Boolean)) {
+      const sep = spec.indexOf(':');
+      if (sep >= 0) {
+        const name = spec.slice(0, sep);
+        const branch = spec.slice(sep + 1);
+        const r = resolveService(root, name, branch, baseBranches);
+        if (!r) { error(`Cannot resolve service "${name}" branch "${branch}" under ${root}`); process.exit(1); }
+        selected.push(r);
+      } else {
+        const found = discovered.find((s) => s.service === spec);
+        if (!found) { error(`Service "${spec}" was not discovered; pass "${spec}:<branch>" to supplement it`); process.exit(1); }
+        selected.push(found);
+      }
+    }
+  } else if (process.stdout.isTTY && process.stdin.isTTY) {
+    const clack = await importESM('@clack/prompts');
+    const picked = await clack.multiselect({
+      message: `Select services changed by ${reqId}:`,
+      options: discovered.map((s) => ({
+        value: s.service,
+        label: `${s.service} (${s.branch}) — ${s.commits.length} commits, ${s.mode}`,
+      })),
+      initialValues: discovered.filter((s) => s.commits.length > 0 && s.mode !== 'fallback').map((s) => s.service),
+      required: true,
+    });
+    if (clack.isCancel(picked)) { info('Cancelled'); return; }
+    selected = discovered.filter((s) => (picked as string[]).includes(s.service));
+  } else {
+    // Non-interactive: take every discovered service that has commits.
+    selected = discovered.filter((s) => s.commits.length > 0);
+  }
+
+  if (selected.length === 0) { warn('No services selected'); return; }
+
+  await runReqAddWrite(reqId, root, originalText, options, selected);
+}
+
+async function runReqAddWrite(
+  reqId: string,
+  root: string,
+  originalText: string,
+  options: ReqAddOptions,
+  selected: import('../requirement/discovery').DiscoveredService[],
+): Promise<void> {
+  const { checkIndexFreshness } = await import('../requirement/edges');
+  for (const s of selected) {
+    const f = checkIndexFreshness(s.repo, s.finalCommit);
+    if (!f.ok) { error(`Index not fresh: ${f.reason}`); process.exit(1); }
+  }
+
+  const { openRequirementStore } = await import('../db/requirement-db');
+  const { store, close } = openRequirementStore(root);
+  try {
+    if (store.getRequirementByReqId(reqId)) {
+      error(`Requirement "${reqId}" already exists; delete it first to re-record`);
+      return;
+    }
+
+    const { loadAllGrammars } = await import('../extraction');
+    await loadAllGrammars();
+
+    const { buildRequirementBundle } = await import('../requirement/add');
+    const requirement = {
+      requirementsId: reqId,
+      title: options.title,
+      originalText,
+      featureName: options.featureName ?? null,
+      featurePath: options.featurePath ?? null,
+      entryPoint: options.api
+        ? JSON.stringify(options.api.split(',').map((a) => a.trim()).filter(Boolean))
+        : null,
+    };
+    const { bundle, builds } = buildRequirementBundle(requirement, selected);
+    const newId = store.saveRequirementBundle(bundle);
+
+    success(`Recorded requirement ${reqId} (id ${newId})`);
+    for (const b of builds) {
+      info(`  ${b.service}: ${b.nodeCount} nodes, ${b.edgeCount} edges`);
+    }
+  } finally {
+    close();
+  }
+}
+
 // Parse and run
 program.parse();
 
 } // end main()
+
+interface ReqAddOptions {
+  title: string;
+  doc: string;
+  featureName?: string;
+  featurePath?: string;
+  api?: string;
+  root?: string;
+  baseBranch: string;
+  services?: string;
+  dryRun?: boolean;
+}

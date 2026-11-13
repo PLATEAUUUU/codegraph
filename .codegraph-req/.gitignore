@@ -1,0 +1,3 @@
+# CodeGraph requirement-graph data — local to each machine, not for committing.
+*
+!.gitignore

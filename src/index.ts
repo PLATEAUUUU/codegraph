@@ -386,12 +386,10 @@ export class CodeGraph {
 
     const instance = new CodeGraph(db, queries, resolvedRoot);
 
-    // Create the independent requirement-graph database (.codegraph-req/).
-    // It lives apart from the code index so a full re-index / uninit never
-    // touches requirement memory. Opened just to apply its schema, then closed.
+    // Create .codegraph-req/requirement.db with its schema.
     try {
       initRequirementDb(resolvedRoot).close();
-    } catch { /* non-fatal: requirement memory is optional, code index still works */ }
+    } catch { /* ignored */ }
 
     // Run initial indexing if requested
     if (options.index) {
@@ -422,7 +420,7 @@ export class CodeGraph {
 
     try {
       initRequirementDb(resolvedRoot).close();
-    } catch { /* non-fatal: requirement memory is optional, code index still works */ }
+    } catch { /* ignored */ }
 
     return new CodeGraph(db, queries, resolvedRoot);
   }

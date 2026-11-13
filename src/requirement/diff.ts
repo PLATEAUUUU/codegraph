@@ -1,7 +1,6 @@
 /**
- * Git diff parsing for requirement change sets: the changed files between two
- * commits, and each file's hunks (line ranges + raw text) for later per-symbol
- * slicing. Pure git; no codegraph dependency.
+ * Git diff parsing: the changed files between two commits, and each file's
+ * hunks (line ranges + raw text).
  */
 
 import { runGit } from './git';
@@ -98,7 +97,7 @@ export function parseDiff(repo: string, base: string, final: string): FileDiff[]
 
   const files: FileDiff[] = [];
   for (const entry of parseNameStatus(nameStatus)) {
-    // Diff the specific path(s); for a rename pass both so git emits the hunks.
+    // Diff the file's path; a rename passes both old and new paths.
     const args = entry.status === 'R'
       ? ['diff', `${base}..${final}`, '--', entry.oldPath!, entry.path]
       : ['diff', `${base}..${final}`, '--', entry.path];

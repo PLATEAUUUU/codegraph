@@ -7,6 +7,7 @@ const GIT_OPTS = {
   timeout: 10000,
   stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe'],
   windowsHide: true,
+  maxBuffer: 256 * 1024 * 1024,
 };
 
 /** Run git in `cwd`; return trimmed stdout, or null on any failure. */

@@ -238,21 +238,21 @@ describe('searchRequirements (jieba FTS)', () => {
   it('finds a requirement by Chinese keyword and returns the full row', () => {
     const id = store.insertRequirement({
       requirementsId: 'REQ-1',
-      title: '行业筛查高级筛选',
-      originalText: '支持按产业链对企业做行业筛查,并提供高级筛选条件',
-      featureName: '行业筛查',
+      title: '商品搜索高级筛选',
+      originalText: '支持按品牌和价格区间对商品做搜索,并提供高级筛选条件',
+      featureName: '商品搜索',
     });
     store.insertRequirement({ title: '订单导出', originalText: '导出订单明细为 Excel' });
 
-    const hits = store.searchRequirements('行业筛查', 3);
+    const hits = store.searchRequirements('商品搜索', 3);
     expect(hits.length).toBeGreaterThan(0);
     expect(hits[0].id).toBe(id);
-    expect(hits[0].title).toBe('行业筛查高级筛选'); // whole row, not a snippet
+    expect(hits[0].title).toBe('商品搜索高级筛选'); // whole row, not a snippet
   });
 
   it('matches English tokens too', () => {
     const id = store.insertRequirement({ title: 'Export orders', originalText: 'Export order details to Excel' });
-    store.insertRequirement({ title: '行业筛查', originalText: '产业链筛查' });
+    store.insertRequirement({ title: '购物车结算', originalText: '购物车商品合并结算' });
     const hits = store.searchRequirements('export', 3);
     expect(hits.map((h) => h.id)).toContain(id);
   });
@@ -261,13 +261,56 @@ describe('searchRequirements (jieba FTS)', () => {
     store.insertRequirement({ title: 'x' });
     expect(store.searchRequirements('   ', 3)).toEqual([]);
   });
+});
+
+describe('saveRequirementBundle', () => {
+  it('writes requirement, change sets, nodes and edges in one call', () => {
+    const reqId = store.saveRequirementBundle({
+      requirement: { requirementsId: 'REQ-1', title: '商品搜索' },
+      services: [
+        {
+          changeSet: { requirementId: 0, service: 'product-service' },
+          changeNodes: [
+            { requirementId: 0, changeSetId: 0, service: 'product-service', qualifiedName: 'a', changeType: 'modify' },
+            { requirementId: 0, changeSetId: 0, service: 'product-service', qualifiedName: 'b', changeType: 'add' },
+          ],
+          edges: [{ sourceIndex: 0, targetIndex: 1, relationType: 'calls' }],
+        },
+      ],
+    });
+
+    const detail = store.getRequirementById(reqId)!;
+    expect(detail.requirement.requirementsId).toBe('REQ-1');
+    expect(detail.changeSets).toHaveLength(1);
+    expect(detail.changeNodes).toHaveLength(2);
+    expect(detail.changeEdges).toHaveLength(1);
+    // The edge's endpoints resolved to the two inserted nodes' real ids.
+    const [a, b] = detail.changeNodes;
+    expect(detail.changeEdges[0]).toMatchObject({
+      sourceChangeNodeId: a.id, targetChangeNodeId: b.id, relationType: 'calls',
+    });
+  });
+
+  it('rolls back everything if a service write fails', () => {
+    expect(() => store.saveRequirementBundle({
+      requirement: { requirementsId: 'REQ-2', title: 't' },
+      services: [{
+        changeSet: { requirementId: 0 },
+        // changeSetId references are set by the writer; force a failure with a
+        // bad edge index that maps to no node, then a throwing second service.
+        changeNodes: [{ requirementId: 0, changeSetId: 0, qualifiedName: 'x', changeType: 'add' }],
+        edges: [],
+      }, null as any], // a null service throws mid-transaction
+    })).toThrow();
+    expect(store.getRequirementByReqId('REQ-2')).toBeNull(); // nothing persisted
+  });
 
   it('reflects updates and deletes in search', () => {
     const id = store.insertRequirement({ title: '旧标题', originalText: '无关内容' });
-    store.updateRequirement(id, { title: '榜单筛选', originalText: '企业所属榜单筛选' });
-    expect(store.searchRequirements('榜单', 3).map((h) => h.id)).toContain(id);
+    store.updateRequirement(id, { title: '优惠券发放', originalText: '新用户注册后发放优惠券' });
+    expect(store.searchRequirements('优惠券', 3).map((h) => h.id)).toContain(id);
 
     store.deleteRequirement(id);
-    expect(store.searchRequirements('榜单', 3)).toEqual([]);
+    expect(store.searchRequirements('优惠券', 3)).toEqual([]);
   });
 });

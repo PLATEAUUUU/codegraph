@@ -1,12 +1,7 @@
--- CodeGraph requirement-graph schema (requirement.db)
+-- CodeGraph requirement-graph schema (.codegraph-req/requirement.db).
 --
--- Lives in its OWN database (.codegraph-req/requirement.db), independent of the
--- code index (.codegraph/codegraph.db). Requirement memory is long-lived: a full
--- re-index or `uninit` of the code graph must NOT touch it. See requirement-db.ts.
---
--- Node identity note: references into the code graph use a LOGICAL KEY
--- (service, file_path, kind, qualified_name), never codegraph's volatile node
--- id. change_edges point at change_nodes.id (our own stable integer PK).
+-- change_nodes identify code by (service, file_path, kind, qualified_name).
+-- change_edges reference change_nodes.id.
 
 -- Requirements: the PRD/requirement master record.
 CREATE TABLE IF NOT EXISTS requirements (
@@ -16,7 +11,7 @@ CREATE TABLE IF NOT EXISTS requirements (
     original_text   TEXT,
     feature_name    TEXT,
     feature_path    TEXT,
-    entry_point     TEXT,                     -- JSON array of {type, service?, method?, value}
+    entry_point     TEXT,                     -- JSON array of backend API paths
     created_at      INTEGER NOT NULL,
     updated_at      INTEGER NOT NULL
 );
@@ -28,8 +23,8 @@ CREATE TABLE IF NOT EXISTS change_sets (
     repo           TEXT,
     service        TEXT,
     branch_name    TEXT,
-    base_commit    TEXT,                      -- requirement start version
-    final_commit   TEXT,                      -- requirement finish version
+    base_commit    TEXT,                      -- parent of the requirement's oldest commit
+    final_commit   TEXT,                      -- the requirement's newest commit
     created_at     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_change_sets_req ON change_sets(requirement_id);
@@ -39,23 +34,21 @@ CREATE TABLE IF NOT EXISTS change_nodes (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     requirement_id     INTEGER NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
     change_set_id      INTEGER NOT NULL REFERENCES change_sets(id) ON DELETE CASCADE,
-    service            TEXT,                  -- microservice name/id (denormalized for the location index)
+    service            TEXT,                  -- microservice name/id
     file_path          TEXT,
-    old_file_path      TEXT,                  -- path before a rename/move
+    old_file_path      TEXT,                  -- path before a rename
     kind               TEXT,                  -- codegraph NodeKind: file, module, class, struct, interface, trait, protocol, function, method, property, field, variable, constant, enum, enum_member, type_alias, namespace, parameter, import, export, route, component, union
-    qualified_name     TEXT,                  -- line-independent semantic full name; the identity anchor
-    old_qualified_name TEXT,                  -- full name before a rename (stitching evidence for delete+add)
-    signature          TEXT,                  -- disambiguates overloads sharing a qualified_name
-    change_type        TEXT,                  -- add / modify / delete / rename
-    git_diff           TEXT                   -- final net diff (base_commit..final_commit)
+    qualified_name     TEXT,                  -- semantic full name, e.g. Class::method
+    old_qualified_name TEXT,                  -- full name before a rename
+    signature          TEXT,                  -- symbol signature text
+    change_type        TEXT,                  -- add / modify / delete
+    git_diff           TEXT                   -- diff hunks touching this symbol, in commit order
 );
 CREATE INDEX IF NOT EXISTS idx_change_nodes_req ON change_nodes(requirement_id);
--- Logical-key composite: "history of a place" queries scan this.
 CREATE INDEX IF NOT EXISTS idx_change_nodes_location
     ON change_nodes(service, file_path, kind, qualified_name);
 
 -- Change edges: relationships between changed symbols within a requirement.
--- Endpoints reference change_nodes.id (our own stable PK), never codegraph ids.
 CREATE TABLE IF NOT EXISTS change_edges (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     requirement_id        INTEGER NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
@@ -68,10 +61,8 @@ CREATE INDEX IF NOT EXISTS idx_change_edges_src ON change_edges(source_change_no
 CREATE INDEX IF NOT EXISTS idx_change_edges_tgt ON change_edges(target_change_node_id);
 
 -- =============================================================================
--- Full-text search over requirements (FTS5). Plain (non external-content) table
--- holding segmented text; RequirementStore maintains it on insert/update/delete
--- with jieba-segmented content. rowid mirrors requirements.id. Split out at the
--- end so a Node build without FTS5 can skip this block (requirement-db.ts).
+-- Full-text search over requirements (FTS5). Holds jieba-segmented text written
+-- by RequirementStore; rowid = requirements.id. Must stay the last statement.
 -- =============================================================================
 CREATE VIRTUAL TABLE IF NOT EXISTS requirements_fts USING fts5(
     title, original_text, feature_name, feature_path
