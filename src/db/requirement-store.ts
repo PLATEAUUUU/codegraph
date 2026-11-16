@@ -99,6 +99,18 @@ export interface RequirementBundle {
   services: BundleService[];
 }
 
+/** One change to a location, with the requirement and commits it came from. */
+export interface LocationHistoryEntry {
+  requirementsId: string | null;
+  title: string | null;
+  service: string | null;
+  changeType: string | null;
+  filePath: string | null;
+  gitDiff: string | null;
+  commits: CommitInfo[];
+  createdAt: number;
+}
+
 // =============================================================================
 // Store
 // =============================================================================
@@ -494,5 +506,44 @@ export class RequirementStore {
       }
       return reqId;
     });
+  }
+
+  /**
+   * Distinct locations whose qualified name contains `fragment` (ASCII
+   * case-insensitive), limited to `service` when given.
+   */
+  findLocations(fragment: string, service?: string, limit = 20): Array<{ service: string | null; qualifiedName: string }> {
+    const pattern = `%${fragment.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const where = service ? 'service = ? AND ' : '';
+    const params = service ? [service, pattern, limit] : [pattern, limit];
+    return this.db.prepare(
+      `SELECT DISTINCT service, qualified_name FROM change_nodes
+       WHERE ${where}qualified_name LIKE ? ESCAPE '\\'
+       ORDER BY service, qualified_name LIMIT ?`
+    ).all(...params).map((r: any) => ({ service: r.service ?? null, qualifiedName: r.qualified_name }));
+  }
+
+  /** Every change to `service` + `qualifiedName` across requirements, newest first. */
+  getLocationHistory(service: string, qualifiedName: string): LocationHistoryEntry[] {
+    const rows = this.db.prepare(
+      `SELECT req.requirements_id, req.title, cn.service, cn.change_type,
+              cn.file_path, cn.git_diff, cs.commits, req.created_at
+       FROM change_nodes cn
+       JOIN change_sets cs ON cs.id = cn.change_set_id
+       JOIN requirements req ON req.id = cn.requirement_id
+       WHERE cn.service = ? AND cn.qualified_name = ?
+       ORDER BY req.created_at DESC, cn.id DESC`
+    ).all(service, qualifiedName);
+
+    return rows.map((r: any) => ({
+      requirementsId: r.requirements_id ?? null,
+      title: r.title ?? null,
+      service: r.service ?? null,
+      changeType: r.change_type ?? null,
+      filePath: r.file_path ?? null,
+      gitDiff: r.git_diff ?? null,
+      commits: r.commits ? JSON.parse(r.commits) : [],
+      createdAt: r.created_at,
+    }));
   }
 }

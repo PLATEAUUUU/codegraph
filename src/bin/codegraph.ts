@@ -3257,6 +3257,48 @@ async function runReqSearch(options: { doc: string; root?: string; limit: string
 }
 
 reqCommand
+  .command('history <qualified_name>')
+  .description('Show every change to a location (service + qualified name) across requirements, newest first.')
+  .requiredOption('--service <name>', 'Service the symbol belongs to')
+  .option('--root <dir>', 'Root directory holding .codegraph-req/ (default: cwd)')
+  .option('-j, --json', 'Output as JSON')
+  .action(async (qualifiedName: string, options: { service: string; root?: string; json?: boolean }) => {
+    const root = options.root ? path.resolve(options.root) : process.cwd();
+    if (!requirementDirExists(root)) {
+      error(`No requirement graph found under ${root} (expected ${REQUIREMENT_DIR}/)`);
+      process.exit(1);
+    }
+    const { openRequirementStore } = await import('../db/requirement-db');
+    const { store, close } = openRequirementStore(root);
+    try {
+      const history = store.getLocationHistory(options.service, qualifiedName);
+      if (options.json) {
+        console.log(JSON.stringify(history, null, 2));
+        return;
+      }
+      if (history.length === 0) {
+        info(`No history for ${options.service} :: ${qualifiedName}`);
+        let candidates = store.findLocations(qualifiedName, options.service);
+        if (candidates.length === 0) candidates = store.findLocations(qualifiedName);
+        if (candidates.length > 0) {
+          info('Did you mean:');
+          for (const c of candidates) console.log(`  --service ${c.service ?? '-'}  "${c.qualifiedName}"`);
+        }
+        return;
+      }
+      console.log(chalk.bold(`\n${options.service} :: ${qualifiedName}`) + `  (${history.length} changes)`);
+      for (const h of history) {
+        console.log(chalk.bold(`\n● ${h.requirementsId ?? '-'}  ${h.title ?? '(untitled)'}`) + `  [${h.changeType ?? '?'}]`);
+        for (const c of h.commits) console.log(`  ${chalk.dim(c.sha.slice(0, 7))} ${c.message}`);
+        const diff = (h.gitDiff ?? '').trim();
+        if (diff) console.log(diff.split('\n').map((l) => '  ' + l).join('\n'));
+      }
+    } finally {
+      close();
+    }
+  });
+
+reqCommand
   .command('update <requirements_id>')
   .description('Re-record a requirement from its branches. Keeps the stored title/text/feature/api unless overridden by a flag. Replaces the existing record atomically.')
   .option('--root <dir>', 'Root directory whose child repos are the services (default: cwd)')
