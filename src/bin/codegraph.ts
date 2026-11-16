@@ -3073,32 +3073,66 @@ reqCommand
   });
 
 reqCommand
-  .command('show <id> [path]')
-  .description('Show a requirement with its change sets, nodes and edges')
-  .option('-j, --json', 'Output as JSON')
-  .action(async (id: string, pathArg: string | undefined, options: { json?: boolean }) => {
-    const projectPath = resolveProjectPath(pathArg);
+  .command('show <requirements_id>')
+  .description('Show a requirement: its change sets, each set\'s commits, and the changed symbols with their relationships.')
+  .option('--root <dir>', 'Root directory holding .codegraph-req/ (default: cwd)')
+  .option('-j, --json', 'Output the full record as JSON')
+  .action(async (reqId: string, options: { root?: string; json?: boolean }) => {
+    const root = options.root ? path.resolve(options.root) : process.cwd();
+    if (!requirementDirExists(root)) {
+      error(`No requirement graph found under ${root} (expected ${REQUIREMENT_DIR}/)`);
+      process.exit(1);
+    }
     const { openRequirementStore } = await import('../db/requirement-db');
-    const { store, close } = openRequirementStore(projectPath);
+    const { store, close } = openRequirementStore(root);
     try {
-      const detail = store.getRequirementById(Number(id));
-      if (!detail) {
-        warn(`No requirement with id ${id}`);
-        return;
-      }
+      const detail = store.getRequirementByReqId(reqId);
+      if (!detail) { error(`Requirement "${reqId}" not found`); process.exit(1); }
       if (options.json) {
         console.log(JSON.stringify(detail, null, 2));
         return;
       }
-      const r = detail.requirement;
-      console.log(chalk.bold(`\nRequirement ${r.id}`) + `  ${r.requirementsId ?? '-'}`);
-      console.log(`  Title:    ${r.title ?? '(untitled)'}`);
-      console.log(`  Feature:  ${r.featureName ?? '-'}  (${r.featurePath ?? '-'})`);
-      console.log(`  Change sets: ${detail.changeSets.length}, nodes: ${detail.changeNodes.length}, edges: ${detail.changeEdges.length}`);
+      renderRequirement(detail);
     } finally {
       close();
     }
   });
+
+function renderRequirement(detail: import('../db/requirement-store').RequirementDetail): void {
+  const r = detail.requirement;
+  console.log(chalk.bold(`\n${r.requirementsId ?? r.id}  ${r.title ?? '(untitled)'}`));
+  console.log(`Feature: ${r.featureName ?? '-'}  (${r.featurePath ?? '-'})`);
+
+  const nodeById = new Map(detail.changeNodes.map((n) => [n.id, n]));
+  const label = (n: typeof detail.changeNodes[number]) => `[${n.changeType ?? '?'}] ${n.qualifiedName ?? n.filePath ?? '?'}`;
+
+  for (const cs of detail.changeSets) {
+    console.log(chalk.bold(`\n● ${cs.service ?? cs.repo ?? '?'}`) + `  (${cs.branchName ?? '-'})`);
+    for (const c of cs.commits) {
+      console.log(`  ${chalk.dim(c.sha.slice(0, 7))} ${c.message}`);
+    }
+
+    const nodes = detail.changeNodes.filter((n) => n.changeSetId === cs.id);
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const edges = detail.changeEdges.filter((e) => nodeIds.has(e.sourceChangeNodeId) && nodeIds.has(e.targetChangeNodeId));
+    const linked = new Set<number>();
+
+    if (edges.length > 0) console.log('  changes:');
+    for (const e of edges) {
+      const s = nodeById.get(e.sourceChangeNodeId);
+      const t = nodeById.get(e.targetChangeNodeId);
+      if (!s || !t) continue;
+      linked.add(s.id); linked.add(t.id);
+      console.log(`    ${label(s)}  ─${e.relationType ?? 'related'}→  ${label(t)}`);
+    }
+
+    const isolated = nodes.filter((n) => !linked.has(n.id));
+    if (isolated.length > 0) {
+      console.log(edges.length > 0 ? '  (standalone):' : '  changes:');
+      for (const n of isolated) console.log(`    ${label(n)}`);
+    }
+  }
+}
 
 reqCommand
   .command('add <requirements_id> [path]')

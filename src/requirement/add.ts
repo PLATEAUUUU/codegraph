@@ -7,8 +7,17 @@
 
 import { classifyCommits } from './classify';
 import { buildServiceEdges } from './edges';
+import { runGit } from './git';
 import type { DiscoveredService } from './discovery';
-import type { RequirementBundle, BundleService, RequirementInput } from '../db/requirement-store';
+import type { RequirementBundle, BundleService, RequirementInput, CommitInfo } from '../db/requirement-store';
+
+/** {sha, message} for each commit, oldest first. */
+function commitInfos(repo: string, shas: string[]): CommitInfo[] {
+  return shas.map((sha) => ({
+    sha,
+    message: runGit(repo, ['show', '-s', '--format=%s', sha]) ?? '',
+  }));
+}
 
 /** Per-service outcome, for reporting what was built. */
 export interface ServiceBuild {
@@ -46,6 +55,7 @@ export function buildRequirementBundle(
         branchName: svc.branch,
         baseCommit: svc.baseCommit,
         finalCommit: svc.finalCommit,
+        commits: commitInfos(svc.repo, svc.commits),
       },
       changeNodes,
       edges,

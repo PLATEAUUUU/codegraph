@@ -20,6 +20,11 @@ export interface RequirementRow {
   updatedAt: number;
 }
 
+export interface CommitInfo {
+  sha: string;
+  message: string;
+}
+
 export interface ChangeSetRow {
   id: number;
   requirementId: number;
@@ -28,6 +33,7 @@ export interface ChangeSetRow {
   branchName: string | null;
   baseCommit: string | null;
   finalCommit: string | null;
+  commits: CommitInfo[];
   createdAt: number;
 }
 
@@ -176,6 +182,7 @@ export class RequirementStore {
       branchName: r.branch_name ?? null,
       baseCommit: r.base_commit ?? null,
       finalCommit: r.final_commit ?? null,
+      commits: r.commits ? JSON.parse(r.commits) : [],
       createdAt: r.created_at,
     };
   }
@@ -242,10 +249,10 @@ export class RequirementStore {
       this.stmts.insertChangeSet = this.db.prepare(`
         INSERT INTO change_sets (
           requirement_id, repo, service, branch_name,
-          base_commit, final_commit, created_at
+          base_commit, final_commit, commits, created_at
         ) VALUES (
           @requirementId, @repo, @service, @branchName,
-          @baseCommit, @finalCommit, @createdAt
+          @baseCommit, @finalCommit, @commits, @createdAt
         )
       `);
     }
@@ -256,6 +263,7 @@ export class RequirementStore {
       branchName: input.branchName ?? null,
       baseCommit: input.baseCommit ?? null,
       finalCommit: input.finalCommit ?? null,
+      commits: JSON.stringify(input.commits ?? []),
       createdAt: Date.now(),
     });
     return Number(info.lastInsertRowid);

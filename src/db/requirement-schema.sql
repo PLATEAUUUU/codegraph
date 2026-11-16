@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS change_sets (
     branch_name    TEXT,
     base_commit    TEXT,                      -- parent of the requirement's oldest commit
     final_commit   TEXT,                      -- the requirement's newest commit
+    commits        TEXT,                      -- JSON array of {sha, message}, oldest first
     created_at     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_change_sets_req ON change_sets(requirement_id);
