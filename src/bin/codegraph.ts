@@ -3298,6 +3298,71 @@ reqCommand
     }
   });
 
+const dictCommand = reqCommand.command('dict').description('Manage the custom segmentation dictionary');
+
+/** Open the requirement store under `root`, or exit if the graph is absent. */
+async function openReqStoreOrExit(rootOpt: string | undefined) {
+  const root = rootOpt ? path.resolve(rootOpt) : process.cwd();
+  if (!requirementDirExists(root)) {
+    error(`No requirement graph found under ${root} (expected ${REQUIREMENT_DIR}/)`);
+    process.exit(1);
+  }
+  const { openRequirementStore } = await import('../db/requirement-db');
+  return openRequirementStore(root);
+}
+
+dictCommand
+  .command('add <terms...>')
+  .description('Add terms to the dictionary and re-segment every requirement')
+  .option('--freq <n>', 'Word frequency for the added terms')
+  .option('--root <dir>', 'Root directory holding .codegraph-req/ (default: cwd)')
+  .action(async (terms: string[], options: { freq?: string; root?: string }) => {
+    const bad = terms.filter((t) => !t.trim() || /\s/.test(t));
+    if (bad.length > 0) { error(`Terms must be non-empty and contain no whitespace: ${bad.join(', ')}`); process.exit(1); }
+    const freq = options.freq !== undefined ? Number(options.freq) : null;
+    if (freq !== null && (!Number.isInteger(freq) || freq <= 0)) { error('--freq must be a positive integer'); process.exit(1); }
+
+    const { store, close } = await openReqStoreOrExit(options.root);
+    try {
+      store.addDictTerms(terms.map((term) => ({ term, freq })));
+      success(`Added ${terms.length} term(s); requirements re-segmented`);
+    } finally {
+      close();
+    }
+  });
+
+dictCommand
+  .command('remove <terms...>')
+  .alias('rm')
+  .description('Remove terms from the dictionary and re-segment every requirement')
+  .option('--root <dir>', 'Root directory holding .codegraph-req/ (default: cwd)')
+  .action(async (terms: string[], options: { root?: string }) => {
+    const { store, close } = await openReqStoreOrExit(options.root);
+    try {
+      const removed = store.removeDictTerms(terms);
+      const missing = terms.filter((t) => !removed.includes(t));
+      if (missing.length > 0) warn(`Not in the dictionary: ${missing.join(', ')}`);
+      if (removed.length > 0) success(`Removed ${removed.length} term(s); requirements re-segmented`);
+    } finally {
+      close();
+    }
+  });
+
+dictCommand
+  .command('list')
+  .description('List every dictionary term')
+  .option('--root <dir>', 'Root directory holding .codegraph-req/ (default: cwd)')
+  .action(async (options: { root?: string }) => {
+    const { store, close } = await openReqStoreOrExit(options.root);
+    try {
+      const terms = store.listDictTerms();
+      if (terms.length === 0) { info('Dictionary is empty.'); return; }
+      for (const t of terms) console.log(t.freq !== null ? `${t.term}\t${t.freq}` : t.term);
+    } finally {
+      close();
+    }
+  });
+
 reqCommand
   .command('update <requirements_id>')
   .description('Re-record a requirement from its branches. Keeps the stored title/text/feature/api unless overridden by a flag. Replaces the existing record atomically.')

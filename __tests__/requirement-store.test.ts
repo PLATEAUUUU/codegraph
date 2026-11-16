@@ -263,6 +263,24 @@ describe('searchRequirements (jieba FTS)', () => {
   });
 });
 
+describe('custom dictionary', () => {
+  const ftsText = (id: number): string =>
+    (db.prepare('SELECT original_text FROM requirements_fts WHERE rowid = ?').get(id) as any).original_text;
+
+  it('re-segments existing requirements when a term is added or removed', () => {
+    const id = store.insertRequirement({ title: 't', originalText: '新增的满减规则在结算中生效' });
+    expect(ftsText(id).split(' ')).not.toContain('满减规则');
+
+    store.addDictTerms([{ term: '满减规则', freq: null }]);
+    expect(store.listDictTerms()).toEqual([{ term: '满减规则', freq: null }]);
+    expect(ftsText(id).split(' ')).toContain('满减规则');
+
+    expect(store.removeDictTerms(['满减规则', '不存在的词'])).toEqual(['满减规则']);
+    expect(store.listDictTerms()).toEqual([]);
+    expect(ftsText(id).split(' ')).not.toContain('满减规则');
+  });
+});
+
 describe('saveRequirementBundle', () => {
   it('writes requirement, change sets, nodes and edges in one call', () => {
     const reqId = store.saveRequirementBundle({

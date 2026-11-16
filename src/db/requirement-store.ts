@@ -6,7 +6,7 @@
  */
 
 import type { SqliteDatabase, SqliteStatement } from './sqlite-adapter';
-import { segment } from '../requirement/segmenter';
+import { segment, addTerms } from '../requirement/segmenter';
 
 export interface RequirementRow {
   id: number;
@@ -99,6 +99,12 @@ export interface RequirementBundle {
   services: BundleService[];
 }
 
+/** A custom dictionary term. */
+export interface DictTerm {
+  term: string;
+  freq: number | null;
+}
+
 /** One change to a location, with the requirement and commits it came from. */
 export interface LocationHistoryEntry {
   requirementsId: string | null;
@@ -137,6 +143,7 @@ export class RequirementStore {
 
   constructor(db: SqliteDatabase) {
     this.db = db;
+    addTerms(this.listDictTerms());
   }
 
   /** Run `fn` in a single transaction. */
@@ -545,5 +552,51 @@ export class RequirementStore {
       commits: r.commits ? JSON.parse(r.commits) : [],
       createdAt: r.created_at,
     }));
+  }
+
+  // --- custom dictionary --------------------------------------------------
+
+  listDictTerms(): DictTerm[] {
+    return this.db.prepare('SELECT term, freq FROM dict_terms ORDER BY term').all()
+      .map((r: any) => ({ term: r.term, freq: r.freq ?? null }));
+  }
+
+  /** Insert or update terms, load them into jieba, then re-segment every requirement. */
+  addDictTerms(terms: DictTerm[]): void {
+    const upsert = this.db.prepare(
+      `INSERT INTO dict_terms (term, freq, created_at) VALUES (?, ?, ?)
+       ON CONFLICT(term) DO UPDATE SET freq = excluded.freq`
+    );
+    this.runInTransaction(() => {
+      for (const t of terms) upsert.run(t.term, t.freq, Date.now());
+    });
+    addTerms(terms);
+    this.resegmentAll();
+  }
+
+  /**
+   * Delete terms, zero their frequency in jieba, then re-segment every
+   * requirement. Returns the terms that existed.
+   */
+  removeDictTerms(terms: string[]): string[] {
+    const del = this.db.prepare('DELETE FROM dict_terms WHERE term = ?');
+    const removed = this.runInTransaction(() => terms.filter((t) => del.run(t).changes > 0));
+    if (removed.length > 0) {
+      addTerms(removed.map((term) => ({ term, freq: 0 })));
+      this.resegmentAll();
+    }
+    return removed;
+  }
+
+  /** Rewrite every requirement's FTS row with the current dictionary. */
+  resegmentAll(): void {
+    const rows = this.db.prepare('SELECT * FROM requirements').all();
+    this.runInTransaction(() => {
+      for (const row of rows) {
+        const r = this.toRequirement(row)!;
+        this.deleteFts(r.id);
+        this.writeFts(r.id, r);
+      }
+    });
   }
 }

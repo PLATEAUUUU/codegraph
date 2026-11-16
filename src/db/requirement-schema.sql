@@ -60,6 +60,13 @@ CREATE INDEX IF NOT EXISTS idx_change_edges_req ON change_edges(requirement_id);
 CREATE INDEX IF NOT EXISTS idx_change_edges_src ON change_edges(source_change_node_id);
 CREATE INDEX IF NOT EXISTS idx_change_edges_tgt ON change_edges(target_change_node_id);
 
+-- Custom segmentation dictionary, loaded into jieba when the store opens.
+CREATE TABLE IF NOT EXISTS dict_terms (
+    term       TEXT PRIMARY KEY,
+    freq       INTEGER,                       -- NULL lets jieba pick one that keeps the term whole
+    created_at INTEGER NOT NULL
+);
+
 -- =============================================================================
 -- Full-text search over requirements (FTS5). Holds jieba-segmented text written
 -- by RequirementStore; rowid = requirements.id. Must stay the last statement.
