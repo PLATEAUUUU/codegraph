@@ -39,7 +39,6 @@ CREATE TABLE IF NOT EXISTS change_nodes (
     old_file_path      TEXT,                  -- path before a rename
     kind               TEXT,                  -- codegraph NodeKind: file, module, class, struct, interface, trait, protocol, function, method, property, field, variable, constant, enum, enum_member, type_alias, namespace, parameter, import, export, route, component, union
     qualified_name     TEXT,                  -- semantic full name, e.g. Class::method
-    old_qualified_name TEXT,                  -- full name before a rename
     signature          TEXT,                  -- symbol signature text
     change_type        TEXT,                  -- add / modify / delete
     git_diff           TEXT                   -- diff hunks touching this symbol, in commit order

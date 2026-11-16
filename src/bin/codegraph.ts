@@ -3168,6 +3168,56 @@ async function runReqDel(reqId: string, options: { root?: string; yes?: boolean 
 }
 
 reqCommand
+  .command('search')
+  .description('Find requirements most similar to a PRD by full-text relevance.')
+  .requiredOption('--doc <file>', 'PRD file to search with')
+  .option('--root <dir>', 'Root directory holding .codegraph-req/ (default: cwd)')
+  .option('--limit <n>', 'Max results', '3')
+  .option('-j, --json', 'Output full rows as JSON')
+  .action(async (options: { doc: string; root?: string; limit: string; json?: boolean }) => {
+    await runReqSearch(options);
+  });
+
+async function runReqSearch(options: { doc: string; root?: string; limit: string; json?: boolean }): Promise<void> {
+  const root = options.root ? path.resolve(options.root) : process.cwd();
+
+  if (!requirementDirExists(root)) {
+    error(`No requirement graph found under ${root} (expected ${REQUIREMENT_DIR}/)`);
+    process.exit(1);
+  }
+
+  let query: string;
+  try {
+    query = fs.readFileSync(path.resolve(options.doc), 'utf-8');
+  } catch {
+    error(`Cannot read PRD file: ${options.doc}`);
+    process.exit(1);
+  }
+
+  const { openRequirementStore } = await import('../db/requirement-db');
+  const { store, close } = openRequirementStore(root);
+  try {
+    const hits = store.searchRequirements(query, Number(options.limit));
+    if (options.json) {
+      console.log(JSON.stringify(hits, null, 2));
+      return;
+    }
+    if (hits.length === 0) {
+      info('No similar requirements found.');
+      return;
+    }
+    for (const r of hits) {
+      console.log(chalk.bold(`${r.requirementsId ?? r.id}`) + `  ${r.title ?? '(untitled)'}`);
+      console.log(`  Feature: ${r.featureName ?? '-'}  (${r.featurePath ?? '-'})`);
+      const text = (r.originalText ?? '').replace(/\s+/g, ' ').trim();
+      if (text) console.log(`  ${text.length > 200 ? text.slice(0, 200) + ' …' : text}`);
+    }
+  } finally {
+    close();
+  }
+}
+
+reqCommand
   .command('update <requirements_id>')
   .description('Re-record a requirement from its branches. Keeps the stored title/text/feature/api unless overridden by a flag. Replaces the existing record atomically.')
   .option('--root <dir>', 'Root directory whose child repos are the services (default: cwd)')
@@ -3257,7 +3307,7 @@ async function runReqAdd(reqId: string, pathArg: string | undefined, options: Re
     process.exit(1);
   }
 
-  const { discoverRequirementChanges, resolveService } = await import('../requirement/discovery');
+  const { discoverRequirementChanges } = await import('../requirement/discovery');
   const { services: discovered, warnings } = discoverRequirementChanges(root, reqId, baseBranches);
   for (const w of warnings) warn(w);
 

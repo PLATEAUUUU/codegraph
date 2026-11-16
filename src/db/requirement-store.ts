@@ -40,7 +40,6 @@ export interface ChangeNodeRow {
   oldFilePath: string | null;
   kind: string | null;
   qualifiedName: string | null;
-  oldQualifiedName: string | null;
   signature: string | null;
   changeType: string | null;
   gitDiff: string | null;
@@ -192,7 +191,6 @@ export class RequirementStore {
       oldFilePath: r.old_file_path ?? null,
       kind: r.kind ?? null,
       qualifiedName: r.qualified_name ?? null,
-      oldQualifiedName: r.old_qualified_name ?? null,
       signature: r.signature ?? null,
       changeType: r.change_type ?? null,
       gitDiff: r.git_diff ?? null,
@@ -269,11 +267,11 @@ export class RequirementStore {
         INSERT INTO change_nodes (
           requirement_id, change_set_id, service,
           file_path, old_file_path, kind, qualified_name,
-          old_qualified_name, signature, change_type, git_diff
+          signature, change_type, git_diff
         ) VALUES (
           @requirementId, @changeSetId, @service,
           @filePath, @oldFilePath, @kind, @qualifiedName,
-          @oldQualifiedName, @signature, @changeType, @gitDiff
+          @signature, @changeType, @gitDiff
         )
       `);
     }
@@ -285,7 +283,6 @@ export class RequirementStore {
       oldFilePath: input.oldFilePath ?? null,
       kind: input.kind ?? null,
       qualifiedName: input.qualifiedName ?? null,
-      oldQualifiedName: input.oldQualifiedName ?? null,
       signature: input.signature ?? null,
       changeType: input.changeType ?? null,
       gitDiff: input.gitDiff ?? null,
