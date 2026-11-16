@@ -3045,15 +3045,20 @@ program
 const reqCommand = program.command('req').description('Query the requirement graph');
 
 reqCommand
-  .command('list [path]')
+  .command('list')
   .description('List stored requirements, newest first')
+  .option('--root <dir>', 'Root directory holding .codegraph-req/ (default: cwd)')
   .option('-l, --limit <n>', 'Max rows to return', '50')
   .option('-o, --offset <n>', 'Rows to skip', '0')
   .option('-j, --json', 'Output as JSON')
-  .action(async (pathArg: string | undefined, options: { limit: string; offset: string; json?: boolean }) => {
-    const projectPath = resolveProjectPath(pathArg);
+  .action(async (options: { root?: string; limit: string; offset: string; json?: boolean }) => {
+    const root = options.root ? path.resolve(options.root) : process.cwd();
+    if (!requirementDirExists(root)) {
+      error(`No requirement graph found under ${root} (expected ${REQUIREMENT_DIR}/)`);
+      process.exit(1);
+    }
     const { openRequirementStore } = await import('../db/requirement-db');
-    const { store, close } = openRequirementStore(projectPath);
+    const { store, close } = openRequirementStore(root);
     try {
       const rows = store.listRequirements(Number(options.limit), Number(options.offset));
       if (options.json) {
@@ -3065,7 +3070,7 @@ reqCommand
         return;
       }
       for (const r of rows) {
-        console.log(`${chalk.bold(String(r.id))}  ${r.requirementsId ?? '-'}  ${r.title ?? '(untitled)'}`);
+        console.log(`${chalk.bold(r.requirementsId ?? String(r.id))}  ${r.title ?? '(untitled)'}`);
       }
     } finally {
       close();
