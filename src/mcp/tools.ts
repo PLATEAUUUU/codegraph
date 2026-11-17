@@ -7,6 +7,7 @@
 import type CodeGraph from '../index';
 import type { QueryPool } from './query-pool';
 import { findNearestCodeGraphRoot, isSameIndexRoot } from '../directory';
+import { requirementTools, REQUIREMENT_TOOL_NAMES, handleRequirementTool } from './requirement-tools';
 import { WslSharedIndexError } from '../db/wsl-shared-index';
 import { DatabaseOpenError, isDatabaseOpenFailure } from '../db/open-error';
 import type { NodeSqliteUnavailableError } from '../db/node-sqlite';
@@ -1892,6 +1893,7 @@ export const tools: ToolDefinition[] = [
     },
     annotations: READ_ONLY_ANNOTATIONS,
   },
+  ...requirementTools,
 ];
 
 /**
@@ -1950,7 +1952,7 @@ export function getStaticTools(): ToolDefinition[] {
  * status) remain fully functional — handlers stay, the library API and CLI are
  * untouched, and `CODEGRAPH_MCP_TOOLS=explore,node,...` re-enables any of them.
  */
-const DEFAULT_MCP_TOOLS = new Set(['explore']);
+const DEFAULT_MCP_TOOLS = new Set(['explore', 'search_requirements', 'get_requirement_changes', 'get_location_history']);
 
 /** realpath when the path exists, the path itself otherwise — never throws. */
 function canonicalPath(p: string): string {
@@ -2911,6 +2913,12 @@ export class ToolHandler {
     if (this.closing) return this.textResult('This MCP session is closing; retry with a connected session.');
     this.activeCalls++;
     try {
+      // Requirement tools read .codegraph-req/ directly; skip the code-index
+      // pipeline (watcher, worker pool, project open) below.
+      if (REQUIREMENT_TOOL_NAMES.has(toolName)) {
+        const root = (typeof args.root === 'string' && args.root) || this.cg?.getProjectRoot() || process.cwd();
+        return handleRequirementTool(toolName, args, root, (s) => this.textResult(s));
+      }
       // Block the first tool call on the engine's post-open reconcile so we
       // never serve rows for files deleted/edited while no MCP server was
       // running. The wait is time-boxed (#905): a huge-repo reconcile takes

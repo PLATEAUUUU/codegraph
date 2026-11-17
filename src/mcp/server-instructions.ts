@@ -75,6 +75,14 @@ calls; a grep/read exploration is dozens.
 - Index lags file writes by ~1 second.
 - Cross-file resolution is best-effort name matching; ambiguous calls may return multiple candidates.
 - No live correctness validation — that's still the TypeScript compiler / test suite / linter's job. Codegraph supplements those with structural context they don't have.
+
+## Requirement memory
+
+Past requirements and the code each one changed are recorded and searchable:
+
+- **Starting a new requirement** → \`search_requirements\` with the new requirement's text; it returns the most similar past requirements to reuse.
+- **Want what a past requirement changed** → \`get_requirement_changes\` with its id: the services, commits and changed symbols with their relationships.
+- **About to edit a symbol** → \`get_location_history\` with its service and qualified name: every past change to that location, newest first.
 `;
 
 /**
