@@ -33,8 +33,10 @@ export const DEFAULT_BASE_BRANCHES = ['main', 'master'];
 /** Cap on the fallback first-parent walk. */
 const FALLBACK_WALK_LIMIT = 100;
 
-/** Direct child directories of `root` that are git repos. */
+/** `[root]` when `root` is itself a git repo, else its direct child git repos. */
 export function scanServiceRepos(root: string): string[] {
+  if (fs.existsSync(path.join(root, '.git'))) return [root];
+
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(root, { withFileTypes: true });

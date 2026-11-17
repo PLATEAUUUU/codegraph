@@ -13,9 +13,7 @@ import { getRequirementDir, getRequirementDbPath } from '../directory';
 import { RequirementStore } from './requirement-store';
 
 /** `.gitignore` written into `.codegraph-req/`; ignores everything but itself. */
-const REQ_GITIGNORE_CONTENT = `# CodeGraph requirement-graph data — local to each machine, not for committing.
-*
-!.gitignore
+const REQ_GITIGNORE_CONTENT = `*
 `;
 
 /** Connection PRAGMAs for requirement.db. */

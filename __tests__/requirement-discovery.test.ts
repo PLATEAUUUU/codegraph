@@ -54,6 +54,15 @@ describe('scanServiceRepos', () => {
     expect(repos).toEqual(['svc-a', 'svc-b']);
   });
 
+  it('returns [root] when root is itself a git repo, ignoring nested repos', () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'req-disc-'));
+    tmps.push(parent);
+    const root = makeRepo(parent, 'mono', 'main');
+    makeRepo(root, 'vendored', 'main'); // nested repo, must be ignored
+
+    expect(scanServiceRepos(root)).toEqual([root]);
+  });
+
   it('returns empty for a missing root', () => {
     expect(scanServiceRepos(path.join(os.tmpdir(), 'does-not-exist-xyz'))).toEqual([]);
   });

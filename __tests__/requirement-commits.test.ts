@@ -33,7 +33,8 @@ function initRepo(): string {
 
 /** Check out `branch`, write `file`, commit; return the new sha. */
 function commitOn(repo: string, branch: string, file: string): string {
-  git(repo, ['checkout', '-q', branch]);
+  // The branch may be unborn right after `git init -b` — already on it then.
+  try { git(repo, ['checkout', '-q', branch]); } catch { /* unborn branch */ }
   fs.writeFileSync(path.join(repo, file), `${file} ${Date.now()} ${Math.random()}\n`);
   git(repo, ['add', '-A']);
   git(repo, ['commit', '-q', '-m', file]);
