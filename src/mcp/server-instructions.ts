@@ -86,6 +86,7 @@ Past requirements and the code each one changed are recorded and searchable:
 - **A requirement is finished** → \`save_requirement\` with its id, title, text, feature name, feature path and APIs. It finds the services whose branch name carries that id and records what each changed. Call it with \`dry_run: true\` first and check the services and commit counts it reports; each service must be re-indexed on its requirement branch, or its edges are refused as stale.
 - **More work landed on a recorded requirement, or its description was wrong** → \`update_requirement\`, same arguments; it re-reads the branches and replaces the record atomically.
 - **A record is wrong and should go** → \`del_requirement\`. It removes the requirement with every change set, symbol and diff under it, and cannot be undone — read the record first and be sure.
+- **A product term keeps being split apart in search** → \`add_dict_terms\` with that term: it joins the search dictionary and every stored requirement is re-segmented, so older records match it too. Add domain and product vocabulary only. \`list_dict_terms\` and \`remove_dict_terms\` manage the dictionary.
 `;
 
 /**

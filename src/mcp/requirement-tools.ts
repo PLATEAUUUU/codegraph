@@ -22,6 +22,9 @@ export const REQUIREMENT_TOOL_NAMES = new Set([
   'save_requirement',
   'update_requirement',
   'del_requirement',
+  'add_dict_terms',
+  'remove_dict_terms',
+  'list_dict_terms',
 ]);
 
 export const requirementTools: ToolDefinition[] = [
@@ -127,7 +130,52 @@ export const requirementTools: ToolDefinition[] = [
     },
     annotations: { readOnlyHint: false, destructiveHint: true },
   },
+  {
+    name: 'add_dict_terms',
+    description:
+      'Add domain terms to the requirement search dictionary, then re-segment every stored requirement so the new terms match older records too. Use it for product terms the segmenter splits wrongly — a term broken apart cannot be searched as one word. Add only domain and product vocabulary; adding ordinary words disturbs how everything else is segmented.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        terms: { type: 'string', description: 'Comma-separated terms to add; each must contain no whitespace.' },
+        freq: { type: 'number', description: 'Word frequency; omit to let the segmenter pick one that keeps the term whole.' },
+        root: rootProperty,
+      },
+      required: ['terms'],
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false },
+  },
+  {
+    name: 'remove_dict_terms',
+    description:
+      'Remove terms from the requirement search dictionary, then re-segment every stored requirement. Terms that were not in the dictionary are reported back.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        terms: { type: 'string', description: 'Comma-separated terms to remove.' },
+        root: rootProperty,
+      },
+      required: ['terms'],
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false },
+  },
+  {
+    name: 'list_dict_terms',
+    description: 'List every term in the requirement search dictionary.',
+    inputSchema: {
+      type: 'object',
+      properties: { root: rootProperty },
+    },
+    annotations: { readOnlyHint: true },
+  },
 ];
+
+/** Split a comma-separated argument into trimmed, non-empty entries. */
+function splitList(value: unknown): string[] {
+  return typeof value === 'string'
+    ? value.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+}
 
 function clip(text: string | null, n: number): string {
   const t = (text ?? '').replace(/\s+/g, ' ').trim();
@@ -209,9 +257,8 @@ async function recordRequirement(
 ): Promise<ToolResult> {
   const { discoverRequirementChanges, resolveServicesSpec, DEFAULT_BASE_BRANCHES } = await import('../requirement/discovery');
   const reqId = String(args.requirements_id ?? '');
-  const baseBranches = typeof args.base_branch === 'string' && args.base_branch
-    ? args.base_branch.split(',').map((b) => b.trim()).filter(Boolean)
-    : DEFAULT_BASE_BRANCHES;
+  const baseBranchList = splitList(args.base_branch);
+  const baseBranches = baseBranchList.length > 0 ? baseBranchList : DEFAULT_BASE_BRANCHES;
 
   const { services: discovered, warnings } = discoverRequirementChanges(root, reqId, baseBranches);
   if (args.dry_run) return text(formatDiscovery(discovered, warnings));
@@ -245,15 +292,14 @@ async function recordRequirement(
   const { loadAllGrammars } = await import('../extraction');
   await loadAllGrammars();
   const { buildRequirementBundle } = await import('../requirement/add');
+  const apiList = splitList(args.api);
   const requirement = {
     requirementsId: reqId,
     title: String(args.title ?? ''),
     originalText: String(args.text ?? ''),
     featureName: typeof args.feature_name === 'string' ? args.feature_name : null,
     featurePath: typeof args.feature_path === 'string' ? args.feature_path : null,
-    entryPoint: typeof args.api === 'string' && args.api
-      ? JSON.stringify(args.api.split(',').map((a) => a.trim()).filter(Boolean))
-      : null,
+    entryPoint: apiList.length > 0 ? JSON.stringify(apiList) : null,
   };
   const { bundle, builds } = buildRequirementBundle(requirement, selected);
   const replaceId = mode === 'update' ? existing!.requirement.id : null;
@@ -323,6 +369,30 @@ export async function handleRequirementTool(
           `Deleted requirement ${id} "${detail.requirement.title ?? '(untitled)'}": ` +
           `${changeSets.length} change set(s), ${changeNodes.length} symbol(s), ${changeEdges.length} relationship(s).`
         );
+      }
+      case 'add_dict_terms': {
+        const terms = splitList(args.terms);
+        if (terms.length === 0) return text('No terms given.');
+        const bad = terms.filter((t) => /\s/.test(t));
+        if (bad.length > 0) return text(`These terms contain whitespace and cannot be added: ${bad.join(', ')}`);
+        const freq = typeof args.freq === 'number' ? args.freq : null;
+        store.addDictTerms(terms.map((term) => ({ term, freq })));
+        return text(`Added ${terms.length} term(s): ${terms.join(', ')}. Stored requirements were re-segmented.`);
+      }
+      case 'remove_dict_terms': {
+        const terms = splitList(args.terms);
+        if (terms.length === 0) return text('No terms given.');
+        const removed = store.removeDictTerms(terms);
+        const missing = terms.filter((t) => !removed.includes(t));
+        const lines: string[] = [];
+        if (removed.length > 0) lines.push(`Removed ${removed.length} term(s): ${removed.join(', ')}. Stored requirements were re-segmented.`);
+        if (missing.length > 0) lines.push(`Not in the dictionary: ${missing.join(', ')}`);
+        return text(lines.join('\n'));
+      }
+      case 'list_dict_terms': {
+        const terms = store.listDictTerms();
+        if (terms.length === 0) return text('The dictionary is empty.');
+        return text(terms.map((t) => (t.freq !== null ? `${t.term} (freq ${t.freq})` : t.term)).join('\n'));
       }
       default:
         return text(`Unknown requirement tool: ${name}`);
