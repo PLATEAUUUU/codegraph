@@ -3491,24 +3491,12 @@ async function selectServices(
   baseBranches: string[],
   servicesOpt: string | undefined,
 ): Promise<import('../requirement/discovery').DiscoveredService[] | null> {
-  const { resolveService } = await import('../requirement/discovery');
+  const { resolveServicesSpec } = await import('../requirement/discovery');
   let selected: typeof discovered;
   if (servicesOpt) {
-    selected = [];
-    for (const spec of servicesOpt.split(',').map((s) => s.trim()).filter(Boolean)) {
-      const sep = spec.indexOf(':');
-      if (sep >= 0) {
-        const name = spec.slice(0, sep);
-        const branch = spec.slice(sep + 1);
-        const r = resolveService(root, name, branch, baseBranches);
-        if (!r) { error(`Cannot resolve service "${name}" branch "${branch}" under ${root}`); process.exit(1); }
-        selected.push(r);
-      } else {
-        const found = discovered.find((s) => s.service === spec);
-        if (!found) { error(`Service "${spec}" was not discovered; pass "${spec}:<branch>" to supplement it`); process.exit(1); }
-        selected.push(found);
-      }
-    }
+    const resolved = resolveServicesSpec(servicesOpt, discovered, root, baseBranches);
+    if ('error' in resolved) { error(resolved.error); process.exit(1); }
+    selected = resolved.services;
   } else if (process.stdout.isTTY && process.stdin.isTTY) {
     const clack = await importESM('@clack/prompts');
     const picked = await clack.multiselect({

@@ -2917,7 +2917,7 @@ export class ToolHandler {
       // pipeline (watcher, worker pool, project open) below.
       if (REQUIREMENT_TOOL_NAMES.has(toolName)) {
         const root = (typeof args.root === 'string' && args.root) || this.cg?.getProjectRoot() || process.cwd();
-        return handleRequirementTool(toolName, args, root, (s) => this.textResult(s));
+        return await handleRequirementTool(toolName, args, root, (s) => this.textResult(s));
       }
       // Block the first tool call on the engine's post-open reconcile so we
       // never serve rows for files deleted/edited while no MCP server was

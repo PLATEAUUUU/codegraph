@@ -83,6 +83,7 @@ Past requirements and the code each one changed are recorded and searchable:
 - **Starting a new requirement** → \`search_requirements\` with the new requirement's text; it returns the most similar past requirements to reuse.
 - **Want what a past requirement changed** → \`get_requirement_changes\` with its id: the services, commits and changed symbols with their relationships.
 - **About to edit a symbol** → \`get_location_history\` with its service and qualified name: every past change to that location, newest first.
+- **A requirement is finished** → \`save_requirement\` with its id, title and text. It finds the services whose branch name carries that id and records what each changed. Call it with \`dry_run: true\` first and check the services and commit counts it reports; each service must be re-indexed on its requirement branch, or its edges are refused as stale.
 `;
 
 /**

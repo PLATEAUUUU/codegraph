@@ -204,6 +204,34 @@ export function resolveService(
 }
 
 /**
+ * Resolve a comma-separated service spec against `discovered`: `name` picks a
+ * discovered service, `name:branch` resolves one discovery missed.
+ */
+export function resolveServicesSpec(
+  spec: string,
+  discovered: DiscoveredService[],
+  root: string,
+  baseBranches = DEFAULT_BASE_BRANCHES,
+): { services: DiscoveredService[] } | { error: string } {
+  const services: DiscoveredService[] = [];
+  for (const entry of spec.split(',').map((s) => s.trim()).filter(Boolean)) {
+    const sep = entry.indexOf(':');
+    if (sep >= 0) {
+      const name = entry.slice(0, sep);
+      const branch = entry.slice(sep + 1);
+      const resolved = resolveService(root, name, branch, baseBranches);
+      if (!resolved) return { error: `Cannot resolve service "${name}" branch "${branch}" under ${root}` };
+      services.push(resolved);
+    } else {
+      const found = discovered.find((s) => s.service === entry);
+      if (!found) return { error: `Service "${entry}" was not discovered; pass "${entry}:<branch>" to supplement it` };
+      services.push(found);
+    }
+  }
+  return { services };
+}
+
+/**
  * Scan `root`'s child repos for a branch named after `reqId` and resolve each
  * service's commits.
  */

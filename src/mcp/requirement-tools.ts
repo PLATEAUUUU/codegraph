@@ -5,7 +5,8 @@
  */
 
 import type { ToolDefinition, ToolResult } from './tools';
-import type { RequirementDetail, LocationHistoryEntry, RequirementRow } from '../db/requirement-store';
+import type { RequirementDetail, LocationHistoryEntry, RequirementRow, RequirementStore } from '../db/requirement-store';
+import type { DiscoveredService } from '../requirement/discovery';
 import { openRequirementStore } from '../db/requirement-db';
 import { requirementDirExists } from '../directory';
 
@@ -18,6 +19,7 @@ export const REQUIREMENT_TOOL_NAMES = new Set([
   'search_requirements',
   'get_requirement_changes',
   'get_location_history',
+  'save_requirement',
 ]);
 
 export const requirementTools: ToolDefinition[] = [
@@ -65,6 +67,28 @@ export const requirementTools: ToolDefinition[] = [
     },
     annotations: { readOnlyHint: true },
   },
+  {
+    name: 'save_requirement',
+    description:
+      'Record a finished requirement: find the services whose branch name contains the requirement id under `root`, take each branch\'s own commits, and store what they changed. Call with dry_run first to check the services and commit counts found, then call again to store. Each service should be re-indexed on its requirement branch first, or its edges are refused as stale.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        requirements_id: { type: 'string', description: 'The requirement id; also the marker looked for in branch names, e.g. "1103259".' },
+        title: { type: 'string', description: 'Requirement title.' },
+        text: { type: 'string', description: 'Full requirement text (the PRD), stored as written.' },
+        services: { type: 'string', description: 'Comma-separated services to record: "name" for a discovered one, "name:branch" to add one discovery missed. Omit to take every discovered service that has commits.' },
+        feature_name: { type: 'string', description: 'Feature/module name.' },
+        feature_path: { type: 'string', description: 'Feature location in the product.' },
+        api: { type: 'string', description: 'Comma-separated backend API paths this requirement reaches.' },
+        base_branch: { type: 'string', description: 'Comma-separated trunk candidates (default: main,master).' },
+        root: rootProperty,
+        dry_run: { type: 'boolean', description: 'Report the services found and store nothing.' },
+      },
+      required: ['requirements_id', 'title', 'text'],
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false },
+  },
 ];
 
 function clip(text: string | null, n: number): string {
@@ -109,6 +133,20 @@ function formatRequirementDetail(detail: RequirementDetail): string {
   return lines.join('\n');
 }
 
+function formatDiscovery(discovered: DiscoveredService[], warnings: string[]): string {
+  const lines = warnings.map((w) => `warning: ${w}`);
+  if (discovered.length === 0) {
+    lines.push('No services found with a branch matching the requirement id.');
+    return lines.join('\n');
+  }
+  lines.push(`${discovered.length} service(s) found:`);
+  for (const s of discovered) {
+    const note = s.commits.length === 0 ? '  (no commits — skipped unless listed in services)' : '';
+    lines.push(`  ${s.service}  branch ${s.branch}  ${s.commits.length} commits  ${s.mode}${note}`);
+  }
+  return lines.join('\n');
+}
+
 function formatLocationHistory(service: string, qualifiedName: string, history: LocationHistoryEntry[]): string {
   const lines = [`${service} :: ${qualifiedName}  (${history.length} changes)`];
   for (const h of history) {
@@ -121,18 +159,81 @@ function formatLocationHistory(service: string, qualifiedName: string, history: 
 }
 
 /**
+ * Discover the requirement's services, then store its change graph. With
+ * dry_run, report what was discovered and store nothing.
+ */
+async function saveRequirement(
+  args: Record<string, unknown>,
+  root: string,
+  store: RequirementStore,
+  text: (s: string) => ToolResult,
+): Promise<ToolResult> {
+  const { discoverRequirementChanges, resolveServicesSpec, DEFAULT_BASE_BRANCHES } = await import('../requirement/discovery');
+  const reqId = String(args.requirements_id ?? '');
+  const baseBranches = typeof args.base_branch === 'string' && args.base_branch
+    ? args.base_branch.split(',').map((b) => b.trim()).filter(Boolean)
+    : DEFAULT_BASE_BRANCHES;
+
+  const { services: discovered, warnings } = discoverRequirementChanges(root, reqId, baseBranches);
+  if (args.dry_run) return text(formatDiscovery(discovered, warnings));
+
+  let selected: DiscoveredService[];
+  if (typeof args.services === 'string' && args.services) {
+    const resolved = resolveServicesSpec(args.services, discovered, root, baseBranches);
+    if ('error' in resolved) return text(resolved.error);
+    selected = resolved.services;
+  } else {
+    selected = discovered.filter((s) => s.commits.length > 0);
+  }
+  if (selected.length === 0) {
+    return text(`No services with commits found for "${reqId}" under ${root}.\n${formatDiscovery(discovered, warnings)}`);
+  }
+
+  if (store.getRequirementByReqId(reqId)) {
+    return text(`Requirement "${reqId}" is already recorded. Delete it or re-record it with "codegraph req update" instead.`);
+  }
+
+  const { checkIndexFreshness } = await import('../requirement/edges');
+  for (const s of selected) {
+    const fresh = checkIndexFreshness(s.repo, s.finalCommit);
+    if (!fresh.ok) return text(`Cannot build edges: ${fresh.reason}`);
+  }
+
+  const { loadAllGrammars } = await import('../extraction');
+  await loadAllGrammars();
+  const { buildRequirementBundle } = await import('../requirement/add');
+  const requirement = {
+    requirementsId: reqId,
+    title: String(args.title ?? ''),
+    originalText: String(args.text ?? ''),
+    featureName: typeof args.feature_name === 'string' ? args.feature_name : null,
+    featurePath: typeof args.feature_path === 'string' ? args.feature_path : null,
+    entryPoint: typeof args.api === 'string' && args.api
+      ? JSON.stringify(args.api.split(',').map((a) => a.trim()).filter(Boolean))
+      : null,
+  };
+  const { bundle, builds } = buildRequirementBundle(requirement, selected);
+  const newId = store.saveRequirementBundle(bundle);
+
+  const lines = [`Recorded requirement ${reqId} (id ${newId}).`];
+  for (const b of builds) lines.push(`  ${b.service}: ${b.nodeCount} symbols, ${b.edgeCount} relationships`);
+  return text(lines.join('\n'));
+}
+
+/**
  * Run a requirement tool against the requirement graph under `root`. `text`
  * wraps a string into the caller's ToolResult. Expected misses (no graph,
  * requirement not found, no history) return a plain text result, not an error.
  */
-export function handleRequirementTool(
+export async function handleRequirementTool(
   name: string,
   args: Record<string, unknown>,
   root: string,
   text: (s: string) => ToolResult,
-): ToolResult {
-  if (!requirementDirExists(root)) {
-    return text(`No requirement graph under ${root}. Record requirements with "codegraph req add" first.`);
+): Promise<ToolResult> {
+  // save_requirement creates the graph on first use; the readers need it present.
+  if (name !== 'save_requirement' && !requirementDirExists(root)) {
+    return text(`No requirement graph under ${root}. Record a requirement with save_requirement (or "codegraph req add") first.`);
   }
   const { store, close } = openRequirementStore(root);
   try {
@@ -161,6 +262,8 @@ export function handleRequirementTool(
         }
         return text(formatLocationHistory(service, qn, history));
       }
+      case 'save_requirement':
+        return await saveRequirement(args, root, store, text);
       default:
         return text(`Unknown requirement tool: ${name}`);
     }
