@@ -20,6 +20,8 @@ export const REQUIREMENT_TOOL_NAMES = new Set([
   'get_requirement_changes',
   'get_location_history',
   'save_requirement',
+  'update_requirement',
+  'del_requirement',
 ]);
 
 export const requirementTools: ToolDefinition[] = [
@@ -78,16 +80,52 @@ export const requirementTools: ToolDefinition[] = [
         title: { type: 'string', description: 'Requirement title.' },
         text: { type: 'string', description: 'Full requirement text (the PRD), stored as written.' },
         services: { type: 'string', description: 'Comma-separated services to record: "name" for a discovered one, "name:branch" to add one discovery missed. Omit to take every discovered service that has commits.' },
-        feature_name: { type: 'string', description: 'Feature/module name.' },
-        feature_path: { type: 'string', description: 'Feature location in the product.' },
-        api: { type: 'string', description: 'Comma-separated backend API paths this requirement reaches.' },
+        feature_name: { type: 'string', description: 'Feature/module name, e.g. "product search".' },
+        feature_path: { type: 'string', description: 'Where the feature sits in the product, e.g. "catalog / search / filters".' },
+        api: { type: 'string', description: 'Comma-separated backend API paths this requirement reaches; empty string if it reaches none.' },
         base_branch: { type: 'string', description: 'Comma-separated trunk candidates (default: main,master).' },
         root: rootProperty,
         dry_run: { type: 'boolean', description: 'Report the services found and store nothing.' },
       },
-      required: ['requirements_id', 'title', 'text'],
+      required: ['requirements_id', 'title', 'text', 'feature_name', 'feature_path', 'api'],
     },
     annotations: { readOnlyHint: false, destructiveHint: false },
+  },
+  {
+    name: 'update_requirement',
+    description:
+      'Re-record a requirement that was already stored: find its services again, take their current commits, and replace the stored record. Use after more work landed on the requirement branches, or to correct the stored description. The replacement is atomic. Call with dry_run first to check the services found.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        requirements_id: { type: 'string', description: 'The id of the requirement to re-record.' },
+        title: { type: 'string', description: 'Requirement title.' },
+        text: { type: 'string', description: 'Full requirement text (the PRD), stored as written.' },
+        feature_name: { type: 'string', description: 'Feature/module name.' },
+        feature_path: { type: 'string', description: 'Where the feature sits in the product.' },
+        api: { type: 'string', description: 'Comma-separated backend API paths this requirement reaches; empty string if it reaches none.' },
+        services: { type: 'string', description: 'Comma-separated services: "name" for a discovered one, "name:branch" to add one discovery missed. Omit to take every discovered service that has commits.' },
+        base_branch: { type: 'string', description: 'Comma-separated trunk candidates (default: main,master).' },
+        root: rootProperty,
+        dry_run: { type: 'boolean', description: 'Report the services found and store nothing.' },
+      },
+      required: ['requirements_id', 'title', 'text', 'feature_name', 'feature_path', 'api'],
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false },
+  },
+  {
+    name: 'del_requirement',
+    description:
+      'Delete a stored requirement and everything recorded under it: its change sets, changed symbols and their diffs. This cannot be undone.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        requirements_id: { type: 'string', description: 'The id of the requirement to delete.' },
+        root: rootProperty,
+      },
+      required: ['requirements_id'],
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true },
   },
 ];
 
@@ -162,11 +200,12 @@ function formatLocationHistory(service: string, qualifiedName: string, history: 
  * Discover the requirement's services, then store its change graph. With
  * dry_run, report what was discovered and store nothing.
  */
-async function saveRequirement(
+async function recordRequirement(
   args: Record<string, unknown>,
   root: string,
   store: RequirementStore,
   text: (s: string) => ToolResult,
+  mode: 'save' | 'update',
 ): Promise<ToolResult> {
   const { discoverRequirementChanges, resolveServicesSpec, DEFAULT_BASE_BRANCHES } = await import('../requirement/discovery');
   const reqId = String(args.requirements_id ?? '');
@@ -189,8 +228,12 @@ async function saveRequirement(
     return text(`No services with commits found for "${reqId}" under ${root}.\n${formatDiscovery(discovered, warnings)}`);
   }
 
-  if (store.getRequirementByReqId(reqId)) {
-    return text(`Requirement "${reqId}" is already recorded. Delete it or re-record it with "codegraph req update" instead.`);
+  const existing = store.getRequirementByReqId(reqId);
+  if (mode === 'save' && existing) {
+    return text(`Requirement "${reqId}" is already recorded. Call update_requirement to re-record it, or del_requirement to remove it first.`);
+  }
+  if (mode === 'update' && !existing) {
+    return text(`Requirement "${reqId}" is not recorded yet. Call save_requirement to record it.`);
   }
 
   const { checkIndexFreshness } = await import('../requirement/edges');
@@ -213,9 +256,13 @@ async function saveRequirement(
       : null,
   };
   const { bundle, builds } = buildRequirementBundle(requirement, selected);
-  const newId = store.saveRequirementBundle(bundle);
+  const replaceId = mode === 'update' ? existing!.requirement.id : null;
+  const newId = store.runInTransaction(() => {
+    if (replaceId !== null) store.deleteRequirement(replaceId);
+    return store.saveRequirementBundle(bundle);
+  });
 
-  const lines = [`Recorded requirement ${reqId} (id ${newId}).`];
+  const lines = [`${mode === 'update' ? 'Updated' : 'Recorded'} requirement ${reqId} (id ${newId}).`];
   for (const b of builds) lines.push(`  ${b.service}: ${b.nodeCount} symbols, ${b.edgeCount} relationships`);
   return text(lines.join('\n'));
 }
@@ -263,7 +310,20 @@ export async function handleRequirementTool(
         return text(formatLocationHistory(service, qn, history));
       }
       case 'save_requirement':
-        return await saveRequirement(args, root, store, text);
+        return await recordRequirement(args, root, store, text, 'save');
+      case 'update_requirement':
+        return await recordRequirement(args, root, store, text, 'update');
+      case 'del_requirement': {
+        const id = String(args.requirements_id ?? '');
+        const detail = store.getRequirementByReqId(id);
+        if (!detail) return text(`Requirement "${id}" not found; nothing deleted.`);
+        const { changeSets, changeNodes, changeEdges } = detail;
+        store.deleteRequirement(detail.requirement.id);
+        return text(
+          `Deleted requirement ${id} "${detail.requirement.title ?? '(untitled)'}": ` +
+          `${changeSets.length} change set(s), ${changeNodes.length} symbol(s), ${changeEdges.length} relationship(s).`
+        );
+      }
       default:
         return text(`Unknown requirement tool: ${name}`);
     }
