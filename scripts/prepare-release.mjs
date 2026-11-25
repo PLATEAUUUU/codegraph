@@ -251,7 +251,7 @@ function main() {
  * which CommonMark accepts regardless.
  */
 function appendLinkRef(text, version) {
-  const refLine = `[${version}]: https://github.com/colbymchenry/codegraph/releases/tag/v${version}`;
+  const refLine = `[${version}]: https://github.com/PLATEAUUUU/codegraph/releases/tag/v${version}`;
   // Already there? Look for a line that EQUALS this (anywhere in the file)
   // to keep idempotency robust against the scattered-vs-block layout.
   const lines = text.split('\n');

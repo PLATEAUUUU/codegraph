@@ -1,15 +1,16 @@
 {
-  "name": "@colbymchenry/codegraph",
+  "name": "@zcry/codegraph-req",
   "version": "1.6.2",
-  "description": "Supercharge AI coding agents with semantic code intelligence — surgical context, fewer tool calls, faster answers. 100% local.",
+  "description": "CodeGraph plus a requirement graph: what each requirement changed, searchable, for AI coding agents. 100% local.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/colbymchenry/codegraph.git"
+    "url": "git+https://github.com/PLATEAUUUU/codegraph.git"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "codegraph": "./dist/bin/codegraph.js"
+    "codegraph": "./dist/bin/codegraph.js",
+    "codegraph-req": "./dist/bin/codegraph.js"
   },
   "files": [
     "dist",

@@ -1,3 +1,26 @@
+# codegraph-req
+
+A fork of [CodeGraph](https://github.com/colbymchenry/codegraph) that adds a
+**requirement graph**: a record of what each requirement changed, so an agent
+starting new work can find the requirements it resembles and read exactly what
+they touched.
+
+On top of everything CodeGraph does, this fork stores — in its own
+`.codegraph-req/` database, separate from the code index:
+
+- a requirement's text, feature and APIs, full-text searchable in Chinese and English
+- the services whose branch carried the requirement id, and each branch's own commits
+- the symbols those commits changed (add / modify / delete) with the diff for each
+- the call relationships among the changed symbols, read from the code index
+
+Available as CLI subcommands (`codegraph req …`) and as MCP tools for agents.
+The command name stays `codegraph`, as upstream.
+
+Everything below is upstream's README and describes the code-intelligence
+features this fork builds on.
+
+---
+
 <div align="center">
 
 # CodeGraph

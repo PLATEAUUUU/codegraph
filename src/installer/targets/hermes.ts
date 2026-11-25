@@ -4,7 +4,7 @@
  * Hermes reads MCP servers from `$HERMES_HOME/config.yaml` under the
  * top-level `mcp_servers` key. We add one entry:
  *
- *   mcp_servers.codegraph -> `codegraph serve --mcp`
+ *   mcp_servers.codegraph -> `codegraph-req serve --mcp`
  *
  * and nothing else. In particular we never write `platform_toolsets` (#2485).
  * With no MCP server named in a platform's list, Hermes loads every enabled
@@ -142,7 +142,7 @@ function writeHermesConfig(): { file: WriteResult['files'][number]; notes: strin
     const top = findTop(text.lines, 'mcp_servers')!;
     throw new Error(
       `${file} writes mcp_servers as a one-line mapping (line ${top.line + 1}), so CodeGraph can't add its server without rewriting it. ` +
-      'Nothing was changed: add `codegraph: {command: codegraph, args: [serve, --mcp]}` to it yourself, or write mcp_servers as a block, then run this again.',
+      'Nothing was changed: add `codegraph: {command: codegraph-req, args: [serve, --mcp]}` to it yourself, or write mcp_servers as a block, then run this again.',
     );
   }
   if (outcome === 'left-as-written') {
@@ -301,7 +301,7 @@ function renderCodeGraphServer(indent: number): string[] {
   const c = ' '.repeat(indent * 3);
   return [
     `${a}codegraph:`,
-    `${b}command: codegraph`,
+    `${b}command: codegraph-req`,
     `${b}args:`,
     `${c}- serve`,
     `${c}- --mcp`,
@@ -364,7 +364,7 @@ function upsertCodeGraphServer(lines: string[]): 'changed' | 'unchanged' | 'left
   const keyIndent = own.indent ?? (indent ?? 2) * 2;
   const has = (key: string) => own.children.some((c) => c.key === key);
   const missing: string[] = [];
-  if (!has('command')) missing.push(`${' '.repeat(keyIndent)}command: codegraph`);
+  if (!has('command')) missing.push(`${' '.repeat(keyIndent)}command: codegraph-req`);
   if (!has('args')) missing.push(`${' '.repeat(keyIndent)}args: [serve, --mcp]`);
   if (missing.length === 0) return 'unchanged';
   lines.splice(contentEnd(lines, existing.line, existing.end), 0, ...missing);

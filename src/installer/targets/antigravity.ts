@@ -118,9 +118,9 @@ function preferredMcpConfigPath(): string {
  * nvm-managed tools like ours.
  */
 function resolveCodegraphCommand(): string {
-  if (process.platform !== 'darwin') return 'codegraph';
+  if (process.platform !== 'darwin') return 'codegraph-req';
   try {
-    const resolved = execSync('command -v codegraph || which codegraph', {
+    const resolved = execSync('command -v codegraph-req || which codegraph-req', {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       shell: '/bin/bash',
@@ -131,7 +131,7 @@ function resolveCodegraphCommand(): string {
       // (~/.local/state/fnm_multishells/<pid>/bin) that fnm removes when the
       // installing shell exits, leaving a dangling command in the GUI app's
       // MCP config. Canonicalize the containing directory so the path outlives
-      // the shell, while preserving the `codegraph` binary name (agents that
+      // the shell, while preserving the `codegraph-req` binary name (agents that
       // validate the command by basename still match).
       try {
         return path.join(fs.realpathSync(path.dirname(resolved)), path.basename(resolved));
@@ -142,7 +142,7 @@ function resolveCodegraphCommand(): string {
   } catch {
     /* fall through to bare name */
   }
-  return 'codegraph';
+  return 'codegraph-req';
 }
 
 /**

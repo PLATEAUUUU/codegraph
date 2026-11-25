@@ -36,7 +36,7 @@ function mkTmpDir(label: string): string {
 }
 
 describe('standalone installer Windows shell guidance (#1294)', () => {
-  const command = 'irm https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1 | iex';
+  const command = 'irm https://raw.githubusercontent.com/PLATEAUUUU/codegraph/main/install.ps1 | iex';
   const source = fs.readFileSync(path.join(__dirname, '..', 'install.sh'), 'utf8');
 
   // Stub uname and downloads, but execute the complete shipped installer.
@@ -55,8 +55,9 @@ describe('standalone installer Windows shell guidance (#1294)', () => {
     expect(result.stderr).not.toContain('unsupported OS');
   });
 
-  it.runIf(process.platform === 'win32')('guides real Git Bash users to PowerShell', () => {
-    const bash = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe');
+  const gitBash = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe');
+  it.runIf(process.platform === 'win32' && fs.existsSync(gitBash))('guides real Git Bash users to PowerShell', () => {
+    const bash = gitBash;
     const result = spawnSync(bash, ['--noprofile', '--norc', '-s'], {
       input: `curl() { echo UNEXPECTED_DOWNLOAD >&2; exit 99; }\n${source}`,
       encoding: 'utf8',
@@ -459,7 +460,7 @@ describe('Installer targets — partial-state idempotency', () => {
     expect(fs.readFileSync(geminiMd, 'utf-8')).toContain('codegraph explore');
 
     const cfg = JSON.parse(fs.readFileSync(settings, 'utf-8'));
-    expect(cfg.mcpServers.codegraph).toEqual({ type: 'stdio', command: 'codegraph', args: ['serve', '--mcp'] });
+    expect(cfg.mcpServers.codegraph).toEqual({ type: 'stdio', command: 'codegraph-req', args: ['serve', '--mcp'] });
   });
 
   it('gemini: install preserves pre-existing settings (security.auth survives)', () => {
@@ -526,7 +527,7 @@ describe('Installer targets — partial-state idempotency', () => {
     expect(fs.existsSync(steering)).toBe(false);
 
     const cfg = JSON.parse(fs.readFileSync(mcp, 'utf-8'));
-    expect(cfg.mcpServers.codegraph).toEqual({ type: 'stdio', command: 'codegraph', args: ['serve', '--mcp'] });
+    expect(cfg.mcpServers.codegraph).toEqual({ type: 'stdio', command: 'codegraph-req', args: ['serve', '--mcp'] });
   });
 
   it('kiro: install deletes a leftover steering codegraph.md (self-heal) (#529)', () => {
@@ -820,7 +821,7 @@ describe('Installer targets — partial-state idempotency', () => {
     expect(result.files[0].action).toBe('updated');
     const body = fs.readFileSync(config, 'utf-8');
     expect(body).toContain('model:\n  default: qwen-3.7');
-    expect(body).toContain('mcp_servers:\n  other:\n    command: other\n  codegraph:\n    command: codegraph');
+    expect(body).toContain('mcp_servers:\n  other:\n    command: other\n  codegraph:\n    command: codegraph-req');
     // No toolset entry: a list naming no MCP server loads every enabled one.
     expect(body.endsWith(toolsets)).toBe(true);
     expect(body).not.toContain('mcp-codegraph');
@@ -998,7 +999,7 @@ describe('Installer targets — partial-state idempotency', () => {
     const first = codex.install('global', { autoAllow: false });
     expect(first.files.find((f) => f.path === tomlPath)?.action).toBe('updated');
     const afterInstall = fs.readFileSync(tomlPath, 'utf-8');
-    expect(afterInstall).toContain('command = "codegraph"');
+    expect(afterInstall).toContain('command = "codegraph-req"');
     expect(afterInstall).not.toContain('[[not-a-table]]');
     expect(afterInstall.endsWith(historyTables)).toBe(true);
 
@@ -1774,7 +1775,7 @@ describe('Installer — Codex install, re-install, refresh and uninstall find th
     fs.mkdirSync(path.dirname(configToml()), { recursive: true });
     fs.writeFileSync(configToml(), text);
   }
-  const block = buildTomlTable('mcp_servers.codegraph', { command: 'codegraph', args: ['serve', '--mcp'] });
+  const block = buildTomlTable('mcp_servers.codegraph', { command: 'codegraph-req', args: ['serve', '--mcp'] });
 
   it('the reported indented table: detected, replaced once, unchanged after, refreshed in place, removed by uninstall', () => {
     const siblings = 'model = "o3"\n\n[mcp_servers]\n\n  [mcp_servers.other]\n    command = "other-server"\n';
@@ -1879,7 +1880,7 @@ describe('Installer — Hermes never writes platform_toolsets and keeps the user
   const read = () => fs.readFileSync(config(), 'utf-8');
   const codegraphKeys = (text: string) => text.split(/\r?\n/).filter((l) => /^\s*["']?codegraph["']?\s*:/.test(l)).length;
   const OTHERS = 'mcp_servers:\n  agentmail:\n    command: npx\n    args:\n    - -y\n    - agentmail-mcp\n';
-  const ENTRY = '  codegraph:\n    command: codegraph\n    args:\n      - serve\n      - --mcp\n    timeout: 120\n    connect_timeout: 60\n    enabled: true\n';
+  const ENTRY = '  codegraph:\n    command: codegraph-req\n    args:\n      - serve\n      - --mcp\n    timeout: 120\n    connect_timeout: 60\n    enabled: true\n';
 
   it('a fresh install writes the server and no platform_toolsets', () => {
     hermes.install('global', { autoAllow: false });
@@ -1931,7 +1932,7 @@ describe('Installer — Hermes never writes platform_toolsets and keeps the user
   it('an entry missing command or args gets only those, at its own indent', () => {
     writeConfig('mcp_servers:\n  codegraph:\n    enabled: true\n    timeout: 300\n');
     hermes.install('global', { autoAllow: false });
-    expect(read()).toBe('mcp_servers:\n  codegraph:\n    enabled: true\n    timeout: 300\n    command: codegraph\n    args: [serve, --mcp]\n');
+    expect(read()).toBe('mcp_servers:\n  codegraph:\n    enabled: true\n    timeout: 300\n    command: codegraph-req\n    args: [serve, --mcp]\n');
   });
 
   it('a 4-space-indented mcp_servers gets the new entry at 4 spaces', () => {
@@ -1939,7 +1940,7 @@ describe('Installer — Hermes never writes platform_toolsets and keeps the user
     hermes.install('global', { autoAllow: false });
     expect(read()).toBe([
       'mcp_servers:', '    agentmail:', '        command: npx',
-      '    codegraph:', '        command: codegraph', '        args:', '            - serve', '            - --mcp',
+      '    codegraph:', '        command: codegraph-req', '        args:', '            - serve', '            - --mcp',
       '        timeout: 120', '        connect_timeout: 60', '        enabled: true', '',
     ].join('\n'));
   });
@@ -2862,7 +2863,7 @@ describe('Installer targets — opencode native MCP shape (#1698)', () => {
     expect(cfg.mcp.codegraph).toBeUndefined();
     expect(cfg.mcp.servers.codegraph).toEqual({
       type: 'local',
-      command: ['codegraph', 'serve', '--mcp'],
+      command: ['codegraph-req', 'serve', '--mcp'],
       disabled: false,
       codemode: false,
     });
@@ -2906,7 +2907,7 @@ describe('Installer targets — opencode native MCP shape (#1698)', () => {
     expect(cfg.mcp.other).toBeDefined();
     expect(cfg.mcp.servers.codegraph).toEqual({
       type: 'local',
-      command: ['codegraph', 'serve', '--mcp'],
+      command: ['codegraph-req', 'serve', '--mcp'],
       disabled: false,
       codemode: false,
     });
@@ -3167,7 +3168,7 @@ describe('Installer targets — Copilot family', () => {
     expect(result.files[0].action).toBe('created');
     const cfg = JSON.parse(fs.readFileSync(file, 'utf-8'));
     expect(cfg.servers.codegraph.type).toBe('stdio');
-    expect(cfg.servers.codegraph.command).toBe('codegraph');
+    expect(cfg.servers.codegraph.command).toBe('codegraph-req');
     // Cursor-mirror: local installs pin the project with an absolute path.
     expect(cfg.servers.codegraph.args).toEqual(['serve', '--mcp', '--path', process.cwd()]);
     // No mcpServers wrapper — VS Code's mcp.json uses `servers`.
@@ -3344,7 +3345,7 @@ describe('Installer targets — Copilot family', () => {
     const cfg = JSON.parse(fs.readFileSync(file, 'utf-8'));
     expect(cfg.mcpServers.codegraph).toEqual({
       type: 'stdio',
-      command: 'codegraph',
+      command: 'codegraph-req',
       args: ['serve', '--mcp'],
       tools: ['*'],
       // Exempt from Copilot CLI's tool search, the same way `alwaysLoad` exempts it in Claude Code (#1696).
@@ -3508,7 +3509,7 @@ describe('Installer targets — Copilot family', () => {
     expect(result.files[0].action).toBe('created');
     const cfg = JSON.parse(fs.readFileSync(file, 'utf-8'));
     // Plain entry — no --path injection for this user-global config.
-    expect(cfg.servers.codegraph).toEqual({ type: 'stdio', command: 'codegraph', args: ['serve', '--mcp'] });
+    expect(cfg.servers.codegraph).toEqual({ type: 'stdio', command: 'codegraph-req', args: ['serve', '--mcp'] });
     expect(cfg.mcpServers).toBeUndefined();
   });
 

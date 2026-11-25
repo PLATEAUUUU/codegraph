@@ -134,7 +134,7 @@ function getOpencodeServerEntry(): {
 } {
   return {
     type: 'local',
-    command: ['codegraph', 'serve', '--mcp'],
+    command: ['codegraph-req', 'serve', '--mcp'],
     disabled: false,
     // Keep codegraph_explore on the native tool list — OpenCode 2's
     // default Code Mode would otherwise hide the one-tool server (#1698).

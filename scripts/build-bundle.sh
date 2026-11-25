@@ -16,8 +16,8 @@
 #     node-version:  e.g. v24.22.1 (default below; pin for reproducible builds)
 #
 # Output:
-#   unix:    release/codegraph-<target>.tar.gz   (launcher: bin/codegraph)
-#   windows: release/codegraph-<target>.zip      (launchers: bin/codegraph + .cmd)
+#   unix:    release/codegraph-<target>.tar.gz   (launchers: bin/codegraph, bin/codegraph-req)
+#   windows: release/codegraph-<target>.zip      (launchers: bin/codegraph{,-req} + .cmd)
 set -euo pipefail
 
 TARGET="${1:?usage: build-bundle.sh <target> [node-version]}"
@@ -145,6 +145,10 @@ DIR="$(cd "$(dirname "$0")/.." && pwd)"
 exec "$DIR/node.exe" --liftoff-only --disable-warning=ExperimentalWarning "$DIR/lib/dist/bin/codegraph.js" "$@"
 LAUNCH
   chmod +x "$STAGE/bin/codegraph"
+  # Second name so the command is reachable even if upstream codegraph owns `codegraph`.
+  cp "$STAGE/bin/codegraph" "$STAGE/bin/codegraph-req"
+  cp "$STAGE/bin/codegraph.cmd" "$STAGE/bin/codegraph-req.cmd"
+  chmod +x "$STAGE/bin/codegraph-req"
 else
   cp "$NODE_BIN" "$STAGE/node"
   cat > "$STAGE/bin/codegraph" <<'LAUNCH'
@@ -171,6 +175,9 @@ export CODEGRAPH_HOST_PPID
 exec "$DIR/node" --liftoff-only --disable-warning=ExperimentalWarning "$DIR/lib/dist/bin/codegraph.js" "$@"
 LAUNCH
   chmod +x "$STAGE/bin/codegraph"
+  # Second name so the command is reachable even if upstream codegraph owns `codegraph`.
+  cp "$STAGE/bin/codegraph" "$STAGE/bin/codegraph-req"
+  chmod +x "$STAGE/bin/codegraph-req"
 fi
 
 # 5. Archive (.zip for Windows, .tar.gz otherwise).

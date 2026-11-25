@@ -6,7 +6,7 @@
 # GitHub Releases. No Node.js, no build tools, no npm required — ideal for a
 # fresh Linux VPS over SSH.
 #
-#   curl -fsSL https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/PLATEAUUUU/codegraph/main/install.sh | sh
 #
 # Upgrade:   run `codegraph upgrade` (or just re-run the same command).
 # Uninstall: curl -fsSL .../install.sh | sh -s -- --uninstall
@@ -17,14 +17,14 @@
 #   CODEGRAPH_BIN_DIR      symlink location  (default: ~/.local/bin)
 set -eu
 
-REPO="colbymchenry/codegraph"
+REPO="PLATEAUUUU/codegraph"
 INSTALL_DIR="${CODEGRAPH_INSTALL_DIR:-$HOME/.codegraph}"
 BIN_DIR="${CODEGRAPH_BIN_DIR:-$HOME/.local/bin}"
 
 if [ "${1:-}" = "--uninstall" ]; then
-  rm -f "$BIN_DIR/codegraph"
+  rm -f "$BIN_DIR/codegraph" "$BIN_DIR/codegraph-req"
   rm -rf "$INSTALL_DIR"
-  echo "CodeGraph uninstalled (removed $INSTALL_DIR and $BIN_DIR/codegraph)."
+  echo "CodeGraph uninstalled (removed $INSTALL_DIR and $BIN_DIR/codegraph{,-req})."
   exit 0
 fi
 
@@ -36,7 +36,7 @@ case "$os" in
   Linux)  os="linux" ;;
   MINGW*|MSYS*|CYGWIN*)
     echo "codegraph: on Windows, open PowerShell and run:" >&2
-    echo "  irm https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1 | iex" >&2
+    echo "  irm https://raw.githubusercontent.com/PLATEAUUUU/codegraph/main/install.ps1 | iex" >&2
     exit 1
     ;;
   *) echo "codegraph: unsupported OS '$os'." >&2; exit 1 ;;
@@ -84,10 +84,11 @@ tar -xzf "$tmp/cg.tar.gz" -C "$dest" --strip-components=1
 # 4. Symlink the launcher onto PATH and mark the current version.
 mkdir -p "$BIN_DIR"
 ln -sf "$dest/bin/codegraph" "$BIN_DIR/codegraph"
+ln -sf "$dest/bin/codegraph-req" "$BIN_DIR/codegraph-req"
 ln -sfn "$dest" "$INSTALL_DIR/current"
 
 echo "Installed to $dest"
-echo "Linked     $BIN_DIR/codegraph"
+echo "Linked     $BIN_DIR/codegraph and $BIN_DIR/codegraph-req"
 
 # 5. Prune older bundles so they don't pile up across upgrades (issue #1074).
 # Each release lives in its own versions/<v> dir (~50 MB with the vendored Node
@@ -118,7 +119,7 @@ fi
 # 6. PATH sanity. Two ways this install can fail to be the codegraph that runs:
 #   1. $BIN_DIR isn't on PATH at all.
 #   2. A *different* codegraph sits earlier on PATH and shadows ours — most
-#      often a stale `npm i -g @colbymchenry/codegraph`, whose launcher keeps
+#      often a stale `npm i -g @zcry/codegraph-req`, whose launcher keeps
 #      running its own version-pinned bundle, so `codegraph --version` disagrees
 #      with what we just installed (issue #1071).
 # Walk PATH once: note whether $BIN_DIR is present and which codegraph wins.
@@ -144,7 +145,7 @@ elif [ -n "$winner" ] && [ "$winner" != "$BIN_DIR/codegraph" ]; then
   echo "  $winner"
   echo "  (this install: $BIN_DIR/codegraph)"
   echo "If 'codegraph --version' shows an unexpected version, remove the other copy"
-  echo "(e.g. 'npm rm -g @colbymchenry/codegraph') or put $BIN_DIR first on PATH."
+  echo "(e.g. 'npm rm -g @zcry/codegraph-req') or put $BIN_DIR first on PATH."
 fi
 
 echo ""
