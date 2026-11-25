@@ -97,7 +97,7 @@ interface ConfigFile {
 export interface TelemetryStatus {
   enabled: boolean;
   /** What decided the current state — mirrors the precedence order. */
-  decidedBy: 'DO_NOT_TRACK' | 'CODEGRAPH_TELEMETRY' | 'config' | 'default';
+  decidedBy: 'disabled' | 'DO_NOT_TRACK' | 'CODEGRAPH_TELEMETRY' | 'config' | 'default';
   machineId: string | null;
   configPath: string;
 }
@@ -227,28 +227,14 @@ export class Telemetry {
   }
 
   /**
-   * Resolution order (first match wins) — keep in sync with TELEMETRY.md:
-   * DO_NOT_TRACK=1 > CODEGRAPH_TELEMETRY=0|1 > stored config > default on.
+   * Telemetry is permanently disabled in this fork: always reports disabled,
+   * ignoring env vars and any stored config. Every downstream path (recording,
+   * persistence, sending, the first-run notice, the daemon interval) gates on
+   * this, so nothing is ever recorded, written, or sent.
    */
   getStatus(): TelemetryStatus {
-    const config = this.readConfig();
-    const machineId = config?.machine_id ?? null;
-    const dnt = this.env.DO_NOT_TRACK;
-    if (dnt !== undefined && dnt !== '' && dnt !== '0' && dnt.toLowerCase() !== 'false') {
-      this.clearPending();
-      return { enabled: false, decidedBy: 'DO_NOT_TRACK', machineId, configPath: this.configPath };
-    }
-    const forced = this.env.CODEGRAPH_TELEMETRY;
-    if (forced !== undefined && forced !== '') {
-      const on = forced !== '0' && forced.toLowerCase() !== 'false';
-      if (!on) this.clearPending();
-      return { enabled: on, decidedBy: 'CODEGRAPH_TELEMETRY', machineId, configPath: this.configPath };
-    }
-    if (config) {
-      if (!config.enabled) this.clearPending();
-      return { enabled: config.enabled, decidedBy: 'config', machineId, configPath: this.configPath };
-    }
-    return { enabled: true, decidedBy: 'default', machineId, configPath: this.configPath };
+    this.clearPending();
+    return { enabled: false, decidedBy: 'disabled', machineId: null, configPath: this.configPath };
   }
 
   isEnabled(): boolean {
